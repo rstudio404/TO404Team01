@@ -1,0 +1,550 @@
+---
+title: "HW 2 TO404"
+author: "Josh Hartman"
+date: "November 2, 2020"
+output: 
+  html_document:
+    number_sections: true
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Explore the data
+```{r, cache=TRUE}
+# attach package readr to read zip files
+#library("readr")
+#Jan <- read_csv("201901-citibike-tripdata.csv.zip")
+#Feb <- read_csv("201902-citibike-tripdata.csv.zip")
+#Mar <- read_csv("201903-citibike-tripdata.csv.zip")
+#Apr <- read_csv("201904-citibike-tripdata.csv.zip")
+#May <- read_csv("201903-citibike-tripdata.csv.zip")
+#Jun <- read_csv("201903-citibike-tripdata.csv.zip")
+#Jul <- read_csv("201903-citibike-tripdata.csv.zip")
+#Aug <- read_csv("201903-citibike-tripdata.csv.zip")
+#Sep <- read_csv("201903-citibike-tripdata.csv.zip")
+#Oct <- read_csv("201903-citibike-tripdata.csv.zip")
+#Nov <- read_csv("201903-citibike-tripdata.csv.zip")
+#Dec <- read_csv("201903-citibike-tripdata.csv.zip")
+#combine all files
+#combo <- rbind(Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec)
+#take a sample of to work with by attaching dplyr package and taking a 5% sample
+#library("dplyr")
+#citibikesample <- sample_frac(combo, 0.05)
+#convert to csv
+#write.csv(citibikesample,"citibikesample.csv")
+#viewing structure of sample
+citibikesample <- read.csv("citibikesample.csv", stringsAsFactors = TRUE)
+str(citibikesample)
+
+```
+# Clean Data
+
+```{r, cache=TRUE}
+# convert relevant fields to factors
+citibikesample$bikeid <- as.factor(citibikesample$bikeid)
+
+#convert 1 and 2 to m and f
+
+citibikesample$gender <- ifelse(citibikesample$gender == 1| citibikesample$gender == "M", "M",ifelse(citibikesample$gender == 2| citibikesample$gender ==  "F","F", NA))
+  
+citibikesample$gender<- as.factor(citibikesample$gender)
+
+
+
+#revisualize
+str(citibikesample)
+```
+
+
+
+
+# Explore Relationships
+```{r }
+# attach ggplot package
+library("ggplot2")
+# attach dplyr
+library("dplyr")
+# attach scales
+library("scales")
+```
+
+## Maps
+```{r, cache=TRUE}
+
+#install.packages("leaflet")
+#install.packages("leaflet.extras")
+#install.packages("sp")
+#install.packages("ggmap")
+#install.packages("maptools")
+#install.packages("httr")
+#install.packages("rgdal")
+#to represent the packages I installed
+
+```
+
+### Static Stations Map
+```{r}
+#attach all packages
+
+library("leaflet")
+library("sp")
+library("ggmap")
+#D. Kahle and H. Wickham. ggmap: Spatial Visualization with ggplot2. The R Journal, 5(1), 144-161. URL http://journal.r-project.org/archive/2013-1/kahle-wickham.pdf
+
+library("maptools")
+library("httr")
+library("rgdal")
+#name citymap a terrain map with defined lon and lat constraints, zoom at 12
+citymap <- get_stamenmap(bbox = c(left = -74.03, bottom = 40.65, right = -73.87, top = 40.87), zoom = 12, maptype = c("terrain")) 
+#display map and overlay citibikesample start station lon and lat to see where start stations are, equivalent representation of all stations
+ggmap(citymap) + geom_point(data=citibikesample, aes(x=start.station.longitude, y=start.station.latitude), colour = "blue", alpha = 0.5)
+```
+
+
+
+
+```{r}
+#setup for following r chunks
+
+#making a new data.frame that maps count of visits to start staion id
+freqstartstationid <- count(citibikesample, start.station.id)
+freqstartstationid<- freqstartstationid[order(freqstartstationid$n, decreasing = TRUE),]
+#merging this df with existing one by start station id, will add new column n which is the count of the start station id in the original df
+freqstartcitibikesample <- merge(citibikesample, freqstartstationid, by.x = "start.station.id", by.y = "start.station.id")
+freqstartcitibikesample$n -> freqstartcitibikesample$start.station.count
+#taking top occuring start stations and making them a new df, topstartstation
+#because the top start stations occur thousands of times, used count of start stations * 2 to get number of rows to include
+
+topstartstation <- head(freqstartcitibikesample[order(freqstartcitibikesample$n, decreasing = TRUE),], n= sum(freqstartstationid[1:3,2]))
+topstartstation <- topstartstation[,c(1,7:8, 17:18)]
+#get tail of df to display lower occuring start stations and name bottomstartstation
+bottomstartstation <- tail(freqstartcitibikesample[order(freqstartcitibikesample$n, decreasing = TRUE), ], n=10)
+#repeat for end stations
+freqendstationid <- count(citibikesample, end.station.id)
+#repeating merge but by end station id
+freqendcitibikesample <- merge(citibikesample, freqendstationid, by.x = "end.station.id", by.y = "end.station.id")
+#taking top occuring end stations and making them a new df, topendstation
+#because the top end stations occur thousands of times, used count of end stations * 2 to get number of rows to include
+topendstation <- head(freqendcitibikesample[order(freqendcitibikesample$n, decreasing = TRUE),], n= max(freqendcitibikesample$n)*2)
+#get tail of this df to display lower occuring end stations
+bottomendstation <- tail(freqendcitibikesample[order(freqendcitibikesample$n, decreasing = TRUE), ], n=10)
+
+#make df to show assym
+#make data frame that has lat and long for each start station
+locationinfo <- freqstartcitibikesample[,c(1,7,8)]
+
+#merging counts for start and end stations and then merging with location info
+assymstation <- merge(freqstartstationid, freqendstationid, by.x = "start.station.id", by.y = "end.station.id")
+assymstation_location <- merge(locationinfo, assymstation, by.x = "start.station.id", by.y = "start.station.id")
+#removing duplicate rows
+assymtraffic <- assymstation_location[!duplicated(assymstation_location$start.station.id),]
+#making it easier to understand
+assymtraffic$start.station.id -> assymtraffic$station.id
+assymtraffic$n.x -> assymtraffic$count.start.station
+assymtraffic$n.y -> assymtraffic$count.end.station
+
+assymtraffic$start.station.id <- NULL
+assymtraffic$n.x <- NULL
+assymtraffic$n.y <- NULL
+
+assymtraffic$count.start.station <- as.integer(assymtraffic$count.start.station)
+assymtraffic$count.end.station <- as.integer(assymtraffic$count.end.station)
+
+assymtraffic$difference <- c(assymtraffic$count.start.station - assymtraffic$count.end.station)
+sortedassymstation <- assymtraffic[order(assymtraffic$difference, decreasing = TRUE),]
+```
+
+### Assymetric Traffic - Interactive Maps
+
+#### Most Frequent Start Stations  
+```{r}
+#using leaflet to read lat and lon from topstartstation df, using the infix operator to chain functions to avoid confusing myself with extensive nesting
+
+#resulting map shows three of the top visited start stations and their location on the map along with aforementioned marker label
+leaflet(topstartstation) %>%
+  addTiles()%>% #adding map tiles
+  addMarkers(data = topstartstation, ~start.station.longitude, ~start.station.latitude, popup = paste("Station ID:", topstartstation$start.station.id, "<br>", "Count:", topstartstation$n)) %>% #adding markers with start station id displayed and the count of how often they occur in the df
+  setView(-73.96,40.75, zoom = 10)
+```
+
+Two of the most frequent start stations are coming from large commuter rail stations in Manhattan. Interestingly, Station ID 435 is not particularly near any remarkable area. Instead, it is near a block packed with restaurants and a Spanish-Portuguese Synagogue.
+
+#### Least Frequent Start Stations 
+```{r}
+#using leaflet to read lat and lon from bottomstartstation df, using the infix operator to chain functions to avoid confusing myself with extensive nesting
+
+#resulting map shows  and their location on the map along with aforementioned marker label
+leaflet(bottomstartstation) %>%
+  addTiles()%>% #adding map tiles
+  addMarkers(data = bottomstartstation, ~start.station.longitude, ~start.station.latitude, popup = paste("Station ID:", bottomstartstation$start.station.id, "<br>", "Count:", bottomstartstation$n)) %>% #adding markers with start station id displayed and the count of how often they occur in the df
+  setView(-73.96,40.75, zoom = 9)
+```
+
+
+#### Most Frequent End Stations 
+```{r}
+#using leaflet to read lat and lon from topendstation df, using the infix operator to chain functions to avoid confusing myself with extensive nesting
+
+#resulting map shows three of the top visited end stations and their location on the map along with aforementioned marker label
+leaflet(topendstation) %>%
+  addTiles()%>% #adding map tiles
+  addMarkers(data = topendstation, ~end.station.longitude, ~end.station.latitude, popup = paste("Station ID:", topendstation$end.station.id, "<br>", "Count:", topendstation$n)) %>% #adding markers with end station id displayed and the count of how often they occur in the df
+  setView(-73.96,40.75, zoom = 10)
+```
+From this we can see that users are ending near popular locations. Two of the most frequent end stations are locations near large commuter rail terminals in Manhattan and the other location displayed is by the famous Madison Square Park.
+
+#### Least Frequent End Stations 
+```{r}
+#using leaflet to read lat and lon from bottomstartstation df, using the infix operator to chain functions to avoid confusing myself with extensive nesting
+
+#resulting map shows  and their location on the map along with aforementioned marker label
+leaflet(bottomendstation) %>%
+  addTiles()%>% #adding map tiles
+  addMarkers(data = bottomendstation, ~end.station.longitude, ~end.station.latitude, popup = paste("Station ID:", bottomendstation$end.station.id, "<br>", "Count:", bottomendstation$n)) %>% #adding markers with end station id displayed and the count of how often they occur in the df
+  setView(-73.96,40.75, zoom = 9)
+```
+
+#### Top 10 Stations with Surplus
+```{r}
+#making df with stations that have surplus
+surplusstations <- sortedassymstation[sortedassymstation$difference > 0, ]
+#get top 10 stations
+topsurplusstations <- head(surplusstations, n = 10)
+#using sortedassymstation df to make a leaflet showing stations used as an end station more than as a start station
+leaflet(topsurplusstations) %>%
+  addTiles()%>% #adding map tiles
+  addMarkers(data = topsurplusstations, ~start.station.longitude, ~start.station.latitude, popup = paste("Station ID:", topsurplusstations$station.id, "<br>", "Surplus:", topsurplusstations$difference)) %>% #adding markers with station id displayed and the surplus
+  setView(-73.96,40.75, zoom = 9)
+```
+
+#### Top 10 Stations with Deficit
+```{r}
+#making df with stations that have surplus
+deficitstations <- sortedassymstation[sortedassymstation$difference < 0, ]
+#get top 10 stations
+bottomdeficitstations <- tail(deficitstations, n = 10)
+#using sortedassymstation df to make a leaflet showing stations used as an end station more than as a start station
+leaflet(bottomdeficitstations) %>%
+  addTiles()%>% #adding map tiles
+  addMarkers(data = bottomdeficitstations, ~start.station.longitude, ~start.station.latitude, popup = paste("Station ID:", bottomdeficitstations$station.id, "<br>", "Deficit:", bottomdeficitstations$difference)) %>% #adding markers with station id displayed and the surplus
+  setView(-73.96,40.75, zoom = 9)
+```
+### Heat Maps
+
+#### Static 
+```{r}
+# making a heat map overlayed on darkened map to show clusters of stations, geom blank to keep scale consistent
+qmplot(x = start.station.longitude, y= start.station.latitude, data = freqstartcitibikesample, geom = "blank", zoom = 12, maptype = "toner-background", darken = .5, legend = "topleft") + stat_density_2d(aes(fill = ..level..), geom = "polygon", alpha = .3) + scale_fill_gradient2("Frequency", low = "white", mid = "yellow", high = "red") 
+
+#originally split between start and end but because they overlap so much, the maps are almost identical
+
+#qmplot(x = end.station.longitude, y= end.station.latitude, data = freqendcitibikesample, geom = "blank", zoom = 11, maptype = "toner-background", darken = .5, legend = "topleft") + stat_density_2d(aes(fill = ..level..), geom = "polygon", alpha = .3) + scale_fill_gradient2("Frequency", low = "white", mid = "yellow", high = "red")
+  
+```
+
+
+
+#### Interactive
+```{r}
+#attach leaflet.extras so can use addHeatmap
+library("leaflet.extras")
+#using citibikesample df, make a heatmap of start stations, radius 5 to account for how close together stations are
+leaflet(citibikesample)%>%
+  addTiles()%>%
+  addHeatmap(lng = ~start.station.longitude, lat = ~start.station.latitude, radius = 5  )
+```
+## Assymetric Traffic Statistics and Graphs
+
+### Plot of times used as a start vs end station 
+#### Top 10 Surplus Over Year
+```{r}
+
+# lubridate package to get date times
+library("lubridate"); library("chron");library("timeDate")
+datafortime <- citibikesample[,c(3:5,7:9,11:13)]
+datafortime$starttime <- ymd_hms(datafortime$starttime)
+datafortime$stoptime <- ymd_hms(datafortime$stoptime)
+
+holidaylist <- c("USChristmasDay","USGoodFriday","USIndependenceDay","USLaborDay",
+    "USNewYearsDay","USThanksgivingDay")        
+myholidays  <- data.frame(ymd(as.character(holiday(2019,holidaylist))))
+
+Holidays <- data.frame(unlist(holidaylist, recursive = TRUE))
+Holidaydf <- cbind(Holidays,myholidays)
+
+
+datafortime$month <- month(datafortime$stoptime)
+datafortime$day <- round(datafortime$stoptime, "day")
+datafortime$hour <- hour(datafortime$stoptime)
+datafortime$weekday <- weekdays(datafortime$stoptime)
+datafortime$holiday <- for(x in 1:nrow(datafortime)){while(is.holiday(datafortime[x,1]) == TRUE)
+  Holidaydf[match(datafortime$starttime, Holidaydf$ymd.as.character.holiday.2019..holidaylist...),1]
+
+}
+
+
+
+
+
+startstationbyday <- count(datafortime, start.station.id, day)
+endstationbyday <- count(datafortime, end.station.id, day)
+#combine df's by station id and month
+combinedcountbyday <- merge(startstationbyday, endstationbyday, by.x = c("start.station.id","day"), by.y = c("end.station.id","day"))
+combinedcountbyday$dif <- c(combinedcountbyday$n.x - combinedcountbyday$n.y)
+combinedcountbyday$day <- as.Date(combinedcountbyday$day)
+#make a for loop to go through and 
+
+#c <- nrow(combinedcountbyday)
+#l <- vector(length = c)
+#for (x in 1:c) {
+  #x -> b
+  #filter(combinedcountbyday, combinedcountbyday$start.station.id == combinedcountbyday[b,1]) -> z
+  #length(z$start.station.id) -> l[b]
+  
+#}
+#countedstation <- cbind(combinedcountbyday, l)
+#distinct(select(countedstation,start.station.id,l)) -> countedstation1
+#count start.station occurences so can grab data for 10 total stations
+countedstation <- count(combinedcountbyday, start.station.id)
+topcombinedcountbyday <- head(combinedcountbyday, n = sum(countedstation[1:5,2]))
+bottomcombinedcountbyday <- tail(combinedcountbyday, n = sum(countedstation1[nrow(countedstation)-5:nrow(countedstation),2]))
+topbottombyday <- rbind(topcombinedcountbyday,bottomcombinedcountbyday)
+orderedtopbottombyday <- topbottombyday[order(topbottombyday$start.station.id, topbottombyday$day, decreasing = FALSE),]
+
+
+surplusplot <- ggplot(topcombinedcountbyday, aes(x= day, y= dif))+ geom_line()+facet_wrap("start.station.id")+labs(x = "Date", y = "Difference")
+#make barplot that shows surplus or deficit by day
+#barplot(height = topcombinedcountbyday$dif, xlab = topcombinedcountbyday$day) 
+surplusbarplot <- ggplot(topcombinedcountbyday, aes(x= day)) + geom_col(aes(y=dif)) + facet_wrap("start.station.id")
+surplusbarplot
+
+
+
+
+```
+
+#### Animation of Surplus v Deficit
+##### Barplot
+```{r}
+library(gganimate)
+animationsurplusbyday <- surplusbarplot + transition_time(day) + labs(title = "Day: {frame_time}")  + shadow_wake(wake_length = 0.1, alpha = FALSE)
+animationsurplusbyday
+```
+##### Line Graph
+```{r}
+surplusplot + transition_reveal(day)
+```
+
+#### Assymetry by Time
+##### Monthly
+```{r}
+#make new df that counts start and end station by month
+startstationbymonth <- count(datafortime, start.station.id, month)
+endstationbymonth <- count(datafortime, end.station.id, month)
+#combine df's by station id and month
+combinedcountbymonth <- merge(startstationbymonth, endstationbymonth, by.x = c("start.station.id","month"), by.y = c("end.station.id","month"))
+combinedcountbymonth$dif <- c(combinedcountbymonth$n.x - combinedcountbymonth$n.y)
+
+group_by(combinedcountbymonth, month)%>%
+summarise(
+  Dif = mean(dif, na.rm = TRUE))%>%
+ggplot(aes(x = month, y= Dif))+geom_col()+xlab("Month") + ylab("Surplus (Deficit)") 
+
+
+
+monthlycountedstation <- count(combinedcountbymonth, combinedcountbymonth$start.station.id)
+head(combinedcountbymonth, n= sum(monthlycountedstation[1:10,2]))%>%
+ggplot(aes(x= month, y= dif))+geom_col()+facet_wrap("start.station.id")
+
+```
+
+##### Week vs Weekend
+```{r}
+#make new df that counts start and end station by month
+startstationbyweekday <- count(datafortime, start.station.id, weekday)
+endstationbyweekday <- count(datafortime, end.station.id, weekday)
+#combine df's by station id and month
+combinedcountbyweekday <- merge(startstationbyweekday, endstationbyweekday, by.x = c("start.station.id","weekday"), by.y = c("end.station.id","weekday"))
+combinedcountbyweekday$dif <- c(combinedcountbyweekday$n.x - combinedcountbyweekday$n.y)
+
+#make weekday an ordered factor so display it Monday to Sunday
+combinedcountbyweekday$weekday <- ordered(combinedcountbyweekday$weekday, levels = c("Monday", "Tuesday", "Wednesday", "Thursday","Friday", "Saturday", "Sunday"))
+
+group_by(combinedcountbyweekday, weekday, decreasing = TRUE)%>%
+summarise(
+  Dif = mean(dif, na.rm = TRUE))%>%
+ggplot(aes(x = weekday, y= Dif))+geom_col()+xlab("Weekday") + ylab("Surplus (Deficit)") 
+
+
+
+weekdaycountedstation <- count(combinedcountbyweekday, combinedcountbyweekday$start.station.id)
+
+head(combinedcountbyweekday, n= sum(weekdaycountedstation[1:5,2]))%>%
+ggplot(aes(x= weekday, y= dif))+geom_col()+facet_wrap("start.station.id")+theme(axis.text.x = element_text(angle=90, hjust=1))
+```
+
+##### Hourly
+```{r}
+#make new df that counts start and end station by month
+startstationbyhour <- count(datafortime, start.station.id, hour)
+endstationbyhour <- count(datafortime, end.station.id, hour)
+#combine df's by station id and month
+combinedcountbyhour <- merge(startstationbyhour, endstationbyhour, by.x = c("start.station.id","hour"), by.y = c("end.station.id","hour"))
+combinedcountbyhour$dif <- c(combinedcountbyhour$n.x - combinedcountbyhour$n.y)
+
+
+group_by(combinedcountbyhour, hour, decreasing = TRUE)%>%
+summarise(
+  Dif = mean(dif, na.rm = TRUE))%>%
+ggplot(aes(x = hour, y= Dif))+geom_col()+xlab("Hour") + ylab("Surplus (Deficit)") 
+
+
+
+hourcountedstation <- count(combinedcountbyhour, combinedcountbyhour$start.station.id)
+
+head(combinedcountbyhour, n= sum(hourcountedstation[1:5,2]))%>%
+ggplot(aes(x= hour, y= dif))+geom_col()+facet_wrap("start.station.id")
+```
+##### Holidays
+```{r}
+
+```
+
+
+## Station Frequency Barplot 
+```{r}
+#make df mostvisited for count of start station id to see frequency of use
+mostvisited <- count(citibikesample, start.station.id)
+#make barplot of and show top 10 stations
+barplot(sort(mostvisited$n, decreasing = TRUE))
+# name variable for station name associated with highest occurence count
+maxvisited <- mostvisited[mostvisited$n == max(mostvisited$n), 1]
+# name variable for station name associated with lowest occurence count
+minvisited <- mostvisited[mostvisited$n == min(mostvisited$n), 1]
+
+mostvisitedend <- count(citibikesample, end.station.id)
+#make barplot of and show top 10 stations
+barplot(sort(mostvisitedend$n, decreasing = TRUE))
+
+# return station name associated with highest occurence count
+maxvisitedend <- mostvisitedend[mostvisitedend$n == max(mostvisitedend$n), 1]
+# return station name associated with lowest occurence count
+minvisitedend <- mostvisitedend[mostvisitedend$n == min(mostvisitedend$n), 1]
+
+```
+
+## Station Frequency Table
+```{r}
+#show most visited start
+head(mostvisited[order(mostvisited$n, decreasing = TRUE), ], n=10)
+#show least visited start
+tail(mostvisited[order(mostvisited$n, decreasing = TRUE), ], n=10)
+#show most visited end
+head(mostvisitedend[order(mostvisitedend$n, decreasing = TRUE), ], n=10)
+#show least visited end stations
+tail(mostvisitedend[order(mostvisitedend$n, decreasing = TRUE), ], n=10)
+```
+
+The visit count to each start station is widely distributed with the lowest visit count being `r min(mostvisited$n)` and the highest visit count being `r max(mostvisited$n)`. The start station with the highest number of visits is station ID `r maxvisited` and the start station with the lowest number of visits is station ID `r minvisited`.
+
+The visit count to each end station is widely distributed with the lowest visit count being `r min(mostvisitedend$n)` and the highest visit count being `r max(mostvisitedend$n)`. The end station with the highest number of visits is station ID `r maxvisitedend` and the end stations with the lowest number of visits are station IDs `r minvisitedend`.
+
+## User demographics
+```{r}
+# make a density plot for birth year split by gender - no longer relevant because I made an age column
+#usermakeup <- ggplot(data=citibikesample, aes(x=birth.year))+geom_density()+facet_wrap(~gender)
+#usermakeup
+
+#create new age column to get age of users, note that it does not account for fractions of years
+citibikesample$age <- (2019 - citibikesample$birth.year)
+
+#find max and min age by gender
+maxagebygender <- tapply(citibikesample$age, citibikesample$gender, max, na.rm=TRUE)
+m_maxage <- maxagebygender["M"]
+f_maxage <- maxagebygender["F"]
+minagebygender <- tapply(citibikesample$age, citibikesample$gender, min, na.rm=TRUE)
+m_minage <- minagebygender["M"]
+f_minage <- minagebygender["F"]
+
+#find average age by gender
+avgagebygender <- tapply(citibikesample$age, citibikesample$gender, mean, na.rm=TRUE)
+mage <- avgagebygender["M"]
+fage <- avgagebygender["F"]
+
+
+#make a density plot for age split by gender
+ageandgenderplot <- ggplot(data= citibikesample, aes(x=age))+geom_density()+facet_wrap(~gender)
+ageandgenderplot
+```
+
+On average, female users are `r round(mage - fage, digits = 2) ` years younger than male users, with females being `r round(fage, digits = 2)` years old and males being `r round(mage, digits = 2)` years old. Of note, users who do not specify their age are significantly older. Male ages range from `r m_minage` to `r m_maxage` years old. Female ages range from `r f_minage` to `r f_maxage` years old. These max ages indicate that users likely provided fraudulent birth years.
+
+## Relation between gender and usertype
+
+```{r }
+#count total number of male and female users
+totalfemale <- sum(citibikesample$gender == "F", na.rm = TRUE)
+totalmale <- sum(citibikesample$gender == "M", na.rm = TRUE)
+#count total number of male and female subscribers
+totalmalesubscribers <- sum(citibikesample$gender == "M" & citibikesample$usertype == "Subscriber", na.rm = TRUE)
+totalfemalesubscribers <- sum(citibikesample$gender == "F" & citibikesample$usertype == "Subscriber", na.rm = TRUE)
+# percent of men and women that are subscribers and unformat variables
+
+percentmalesubscribe <- label_percent(accuracy = 0.01)(totalmalesubscribers/totalmale)
+percentfemalesubscribe <- label_percent(accuracy = 0.01)(totalfemalesubscribers/totalfemale)
+#make a barplot for usertype split by gender 
+genderusertypeplot <- ggplot(data=citibikesample, aes(x=usertype))+geom_bar()+facet_wrap(~gender)
+genderusertypeplot
+
+```
+
+Overall, there are more men than women, with men exceeding women by `r formatC((totalmale - totalfemale), big.mark = ",")`. Additionally, more subscribers are men than women.In fact, there are `r formatC(totalmalesubscribers, big.mark = ",")` male subscribers compared to `r formatC(totalfemalesubscribers, big.mark=",")` female subscribers. Notably, the subscription rates are higher for men than for women, with `r percentmalesubscribe` of men subscribing and only `r percentfemalesubscribe` of women subscribing.
+
+## Relationship between gender and trip duration
+
+```{r}
+#find mean trip duration by gender
+tripbygender <- tapply(citibikesample$tripduration, citibikesample$gender, mean, na.rm=TRUE)
+mtrip <- round(tripbygender["M"]/60, digits = 2)
+ftrip <- round(tripbygender["F"]/60, digits = 2)
+
+#make a boxplot with a log10 scale to conceptualize the average tripduration by gender
+gendertripplot <- ggplot(data=citibikesample, aes(x=gender, y=tripduration))+geom_boxplot()+scale_y_log10()
+gendertripplot
+```
+
+On average, women take `r ftrip - mtrip` minute longer trips, with women taking an average of `r ftrip` minutes and men taking an average of `r mtrip` minutes.
+
+## Distance
+```{r}
+#attach geometry package
+library("hans")
+#make column that specifies distance per trip in mi
+citibikesample$distance <- haversine(citibikesample$start.station.latitude, citibikesample$start.station.longitude, citibikesample$end.station.latitude, citibikesample$end.station.longitude)*0.621371
+
+#calculate max, min, avg
+maxdist <- round(max(citibikesample$distance, na.rm = TRUE), digits = 2)
+mindist <- round(min(citibikesample$distance, na.rm = TRUE), digits = 2)
+avgdist <- round(mean(citibikesample$distance, na.rm = TRUE), digits = 2)
+
+#Create speed column in mph
+citibikesample$speed <- citibikesample$distance/(citibikesample$tripduration/(3600))
+#calculate max, min, avg
+maxspeed <- round(max(citibikesample$speed, na.rm = TRUE), digits = 2)
+minspeed <- round(min(citibikesample$speed, na.rm = TRUE), digits = 2)
+avgspeed <- round(mean(citibikesample$speed, na.rm = TRUE), digits = 2)
+
+#calculate avg speed by gender in mph
+avgspeedbygender <- tapply(citibikesample$speed, citibikesample$gender, mean, na.rm=TRUE)
+mavgspeed <- round(avgspeedbygender["M"], digits = 2)
+favgspeed <- round(avgspeedbygender["F"], digits = 2)
+``` 
+Some interesting findings are seen when looking at distances and speeds of user trips. The longest trip was `r maxdist` miles while the average trip was `r avgdist` miles. The max average speed was `r maxspeed` mph while the average of these speeds was `r avgspeed` mph. Looks like even on bikes they aren't moving anywhere very fast. Finally, speed by gender reveals that men travel an average of `r mavgspeed - favgspeed` mph faster than women, at an average of `r mavgspeed`mph. 
+
+
+```
+
