@@ -1,0 +1,93 @@
+---
+title: "Group Project"
+author: "Wesley Chiu"
+date: "11/23/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Set up libraries here
+```{r}
+library(dplyr)
+library(stringr)
+library(geosphere)
+```
+
+```{r, cache=TRUE}
+# First, I downloaded all the data files and extracted them to a folder within my project folder. 
+
+# Next, I used this code to merge all the files. 
+filenames <- list.files(path="C:/Users/wesle/Desktop/TO404/Final Group Project/MergeFolder", pattern="*.csv")
+fullpath <- file.path("C:/Users/wesle/Desktop/TO404/Final Group Project/MergeFolder",filenames)
+citibike <- do.call("rbind",lapply(fullpath,FUN=function(files){ read.csv(files)}))
+
+# I then want to take a sample of this data to work with 
+# Set a seed for the random sample so that the data is consistent
+set.seed(42)
+citisample <- sample_frac(citibike, size = .05)
+# Free up memory by getting rid of initial merged file 
+citibike <- NULL
+
+# then add weather data to the data frame
+weather <- read.csv("2019_NY_Weather.csv")
+weather$TAVG <- (weather$TMAX + weather$TMIN)/2
+```
+
+#### Clean and prepare dataset for analysis
+```{r}
+# Transform variables
+citisample$start.station.id <- as.factor(citisample$start.station.id)
+citisample$end.station.id <- as.factor(citisample$end.station.id)
+citisample$bikeid <- as.factor(citisample$bikeid)
+citisample$usertype <- as.factor(citisample$usertype)
+citisample$gender <- as.factor(citisample$gender)
+
+# Extract some data from the date column 
+# Since the format of each time is the same, we can get day and month by extracting based on character position 
+citisample$day <- as.numeric(str_sub(as.character(citisample$starttime),9,10))
+citisample$month <- as.numeric(str_sub(as.character(citisample$starttime),6,7))
+# Put the day and month together to get dates, and we are only using 2019 data so hard code 2019
+citisample$date <- paste(citisample$month, "/", citisample$day, "/19",  sep = "")
+citisample$date <- as.Date(citisample$date, format = "%m/%d/%y")
+# Extract weekend/weekday
+citisample$DoW <- format(citisample$date, "%u")
+citisample$dayid <- ifelse(citisample$DoW < 6, "Weekday", "Weekend")
+citisample$dayid <- as.factor(citisample$dayid)
+# Create another column for merging bike and weather data
+citisample$mergedate <- paste(citisample$month, "/", citisample$day, sep = "")
+# Lastly, format day and month as factors for visualizations
+citisample$day <- as.factor(citisample$day)
+citisample$month <- as.factor(citisample$month)
+# Also, extract hour from the starttime
+citisample$hour <- as.numeric(str_sub(as.character(citisample$starttime), 12, 13))
+citisample$hour <- as.factor(citisample$hour)
+```
+
+```{r}
+# Calculating the distance (mi) travelled for each ride:
+R = 3958  # radius of earth in miles (at New York's latitude)
+citisample$distance <- distHaversine(cbind(citisample$start.station.longitude, citisample$start.station.latitude), cbind(citisample$end.station.longitude, citisample$end.station.latitude), R)
+
+# Fixing the date in the weather data so it matches the merge column in the bike data
+weather$DATE <- str_sub(weather$DATE, 1, nchar(as.character(weather$DATE))-5)
+
+```
+
+#### Create a table with data grouped by date
+```{r}
+avgdata <- citisample %>%
+  group_by(mergedate) %>%
+  summarize(count = n(),
+            dist = mean(distance, na.rm = TRUE),
+            dur = mean(tripduration, na.rm = TRUE),
+            speed = dist/dur)
+```
+
+#### Merge weather data and avg by date data
+```{r}
+combined_avg <- merge(avgdata, weather, by.x = "mergedate", by.y = "DATE")
+```
+
