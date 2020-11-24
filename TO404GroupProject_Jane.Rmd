@@ -1,0 +1,127 @@
+---
+title: "Group Project"
+author: "Jane Zhou"
+date: "11/23/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import and Consolidate Data
+```{r, cache=TRUE}
+# load library dplyr (for data manipulation)
+library(dplyr)
+
+# read CSV file containing 5% sample
+sample19 <- read.csv("sample19.csv")
+
+# convert fields to factors as needed
+sample19$starttime <- as.factor(sample19$starttime)
+sample19$start.station.name <- as.factor(sample19$start.station.name)
+sample19$end.station.name <- as.factor(sample19$end.station.name)
+sample19$usertype <- as.factor(sample19$usertype)
+sample19$birth.year <- as.factor(sample19$birth.year)
+sample19$gender <- as.factor(sample19$gender)
+```
+
+## Visualize Data
+```{r}
+# load library ggplot2 (for data visualization)
+library(ggplot2)
+```
+
+### Gender 
+```{r}
+# change gender category labels (0=unknown; 1=male; 2=female)
+sample19$gender_new <- ifelse(sample19$gender == 1, "male", ifelse(sample19$gender == 2, "female", "unknown"))
+
+# create bar plot with gender on x-axis 
+plot1 <- ggplot(data=sample19, aes(x=gender_new, fill=..count..)) + geom_bar() + scale_fill_gradient(low="greenyellow", high="darkgreen") + labs(x="gender") + theme(legend.position = "none")
+plot1
+```
+
+- Almost three times as many males ride Citi Bikes as females.
+
+### Age
+```{r}
+# calculate bikers' ages and save to new column
+sample19$age <- 2019 - as.numeric(as.character(sample19$birth.year))
+
+# create histogram plotting age
+plot2 <- ggplot(data=sample19, aes(x=age, fill=..count..)) + geom_histogram(binwidth=1) + scale_fill_gradient(low="greenyellow", high="darkgreen")
+plot2
+```
+
+- Most Citi Bikers are in their mid-20s to late-40s (the average age is `r round(mean(sample19$age), 0)`).
+- Interesting peak at 50. Is exercising more and being healthy a common new year's resolution for 50 year olds?
+- The youngest Citi Biker is `r min(sample19$age, na.rm = TRUE)`.
+- The oldest Citi Biker is `r max(sample19$age, na.rm = TRUE)`.
+
+### User Type
+**FREQUENCY**
+```{r}
+# create bar plot with user type on x-axis 
+plot3 <- ggplot(data=sample19, aes(x=usertype, fill=usertype)) + geom_bar() + scale_fill_manual(values=c("chartreuse3", "darkgreen")) + theme(legend.position = "none")
+plot3
+```
+
+- There are about six times as many subscribers as regular customers.
+
+**TRIP DURATION**
+```{r}
+# create violin plot with user type on x-axis and trip duration on y-axis
+plot4 <- ggplot(data=sample19, aes(x=usertype, y=tripduration, fill=usertype)) + geom_violin() + scale_y_log10() + scale_fill_manual(values=c("darkgreen", "chartreuse3")) + theme(legend.position = "none")
+plot4
+```
+
+- Subscribers tend to bike for shorter durations than regular customers, which makes sense because subscribers are probably NYC locals. They can ride Citi Bikes whenever they want, and they ride more for the purpose of getting from one place to another efficiently (unlike tourists who might spend more time biking around leisurely).
+
+### Number of Trips
+**OVER A DAY**
+```{r}
+# extract hour from start time and save to new column
+sample19$hour <- substring(sample19$starttime, 12, 13)
+
+# create bar plot with hour on x-axis
+plot5 <- ggplot(data=sample19, aes(x=hour, fill=..count..)) + geom_bar() + scale_fill_gradient(low="greenyellow", high="darkgreen")
+plot5
+```
+
+- The number of trips peak around 8-9am and 5-6pm (rush hours), which suggests that many people use Citi Bike to get to and from school and work.
+- The number of trips rises throughout the afternoon perhaps as a result of students getting off from school.
+
+**OVER A WEEK**
+```{r}
+# extract date from start time, convert to day of the week, and save to new column
+sample19$day <- weekdays(as.Date(substring(sample19$starttime, 1, 10))) 
+
+# order the bars
+sample19$day <- factor(sample19$day,levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
+
+# create bar plot with day of the week on x-axis
+plot6 <- ggplot(data=sample19, aes(x=day, fill=day)) + geom_bar() + scale_fill_manual(values=c("darkgreen", "darkgreen", "darkgreen", "darkgreen", "darkgreen", "chartreuse3", "chartreuse3")) + theme(legend.position = "none")
+plot6
+```
+
+- Less people use Citi Bike on weekends, especially on Sundays. This graph supports the hypothesis that the customer base of Citi Bike is primarily composed of workers and students (some jobs and classes are Monday-Saturday). Also, Sunday is usually the day to rest - no work and less errands to run. 
+
+**OVER A YEAR**
+```{r}
+# extract month from start time and save to new column
+sample19$month <- substring(sample19$starttime, 6, 7)
+
+# create bar plot with month on x-axis
+plot7 <- ggplot(data=sample19, aes(x=month, fill=..count..)) + geom_bar() + scale_fill_gradient(low="greenyellow", high="darkgreen")
+plot7
+```
+
+- People use Citi Bike the most during September, perhaps because  of the nice weather and the fact that students have started school again.
+- Less people use Citi Bike during the winter, most likely because snow and ice make the sidewalks and roads slippery (safety hazard). There is a sharp decline in trips during November and December, which is generally when it begins snowing in NYC.
+
+## The Average Citi Biker
+- male
+- young or middle-aged adult
+- NYC area resident
+- student or worker
