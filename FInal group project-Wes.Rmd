@@ -17,19 +17,24 @@ library(geosphere)
 ```
 
 ```{r, cache=TRUE}
-# First, I downloaded all the data files and extracted them to a folder within my project folder. 
+# 
+# This section is for making the files, our group decided to use one common sample file instead
+# # First, I downloaded all the data files and extracted them to a folder within my project folder. 
+# 
+# # Next, I used this code to merge all the files. 
+# filenames <- list.files(path="C:/Users/wesle/Desktop/TO404/Final Group Project/MergeFolder", pattern="*.csv")
+# fullpath <- file.path("C:/Users/wesle/Desktop/TO404/Final Group Project/MergeFolder",filenames)
+# citibike <- do.call("rbind",lapply(fullpath,FUN=function(files){ read.csv(files)}))
+# 
+# # I then want to take a sample of this data to work with 
+# # Set a seed for the random sample so that the data is consistent
+# set.seed(42)
+# citisample <- sample_frac(citibike, size = .05)
+# # Free up memory by getting rid of initial merged file 
+# citibike <- NULL
 
-# Next, I used this code to merge all the files. 
-filenames <- list.files(path="C:/Users/wesle/Desktop/TO404/Final Group Project/MergeFolder", pattern="*.csv")
-fullpath <- file.path("C:/Users/wesle/Desktop/TO404/Final Group Project/MergeFolder",filenames)
-citibike <- do.call("rbind",lapply(fullpath,FUN=function(files){ read.csv(files)}))
-
-# I then want to take a sample of this data to work with 
-# Set a seed for the random sample so that the data is consistent
-set.seed(42)
-citisample <- sample_frac(citibike, size = .05)
-# Free up memory by getting rid of initial merged file 
-citibike <- NULL
+# Read in sample file
+citisample <- read.csv("sample19.csv")
 
 # then add weather data to the data frame
 weather <- read.csv("2019_NY_Weather.csv")
