@@ -1,0 +1,55 @@
+---
+title: "Group Project TO404"
+author: "Lena Sophie Ivens"
+date: "11/28/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import and Consolidate Data
+```{r, cache=TRUE}
+# load library dplyr (for data manipulation)
+library(dplyr)
+# read CSV file containing 5% sample
+sample19 <- read.csv("~/Downloads/sample19.csv")
+# convert fields to factors as needed
+sample19$starttime <- as.factor(sample19$starttime)
+sample19$start.station.name <- as.factor(sample19$start.station.name)
+sample19$end.station.name <- as.factor(sample19$end.station.name)
+sample19$usertype <- as.factor(sample19$usertype)
+sample19$birth.year <- as.factor(sample19$birth.year)
+sample19$gender <- as.factor(sample19$gender)
+```
+
+Most traveled bikes - need maintenance
+
+### Most travelled bikes
+```{r}
+# load library "hans" (for calculating distance)
+library(hans)
+# make column that specifies distance per trip in mi
+sample19$distance <- haversine(sample19$start.station.latitude, sample19$start.station.longitude, sample19$end.station.latitude, sample19$end.station.longitude)*0.621371
+# load library "ggplot" (for data visualization)
+library(ggplot2)
+# group sample by bikeid and distance
+bikes <- sample19 %>%
+        group_by(bikeid) %>%
+        mutate(distance_per_bike = sum(distance)) %>%
+        mutate(trips_per_bike = n())
+# remove duplicate bikeid's and create new data frame
+bikes1 <- select(bikes, bikeid, distance_per_bike, trips_per_bike)
+bikes1 <- bikes1[!duplicated(bikes1$bikeid), ]
+# create a scatter plot with distance and number of trips
+plot1 <- ggplot(data = bikes1, aes(x = trips_per_bike, y = distance_per_bike)) + geom_point()
+plot1
+# identifying most used and least used bikes
+mostusedbikes <- head(bikes1[order(bikes1$distance_per_bike, decreasing = TRUE),], n = 100)
+mostusedbikes
+leastusedbikes <- tail(bikes1[order(bikes1$distance_per_bike, decreasing = TRUE),], n = 100)
+leastusedbikes
+```
+
+- Some bikes have been used more than others ultimately requiring more maintenance. As we can see the distance traveled ranges from `r round(max(bikes1$distance_per_bike),2)` miles to 0 miles. The scatterplot reveals that there is no unusual pattern since the more a bike is booked the larger the distance traveled. 
