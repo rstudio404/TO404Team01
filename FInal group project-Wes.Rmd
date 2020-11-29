@@ -182,12 +182,15 @@ baseplot_Week + geom_line() + geom_smooth() + facet_wrap(~ dayid)
 During the weekdays, average speed declines slightly with temperature. During the weekend, average speed is at a maximum when it is around 40 degrees, and a minimum when it is at 65 degrees. 
 
 
-
+#### Next we look at the impact of wind speed on bike data
 ```{r}
 # Impact of Wind Speed
 baseplot <- ggplot(data = combined_avg, aes(x = AWND, y = count))
 baseplot + geom_line() + geom_smooth()
 ```
+The peak number of rides occurs when wind speed is 2.5, which suggests that people enjoy biking when there is a bit of a breeze outside. However, anything more than that and the number of rides begins to decrease steadily as wind increases. 
+
+#### We can also look at the impact of rainfall on bike data
 
 ```{r}
 # Impact of Rain
