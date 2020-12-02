@@ -15,6 +15,7 @@ library(dplyr)
 library(stringr)
 library(ggplot2)
 library(geosphere)
+library(hans)
 ```
 
 ```{r, cache=TRUE}
@@ -158,6 +159,21 @@ baseplot_userT + geom_line() + geom_smooth() + facet_wrap(~ usertype)
 ```
 The same problem as before is here, where the number of total bikes is very different between customers and subscribers, but we can again see that the general curve is the same. 
 
+##### Looking at how number of rides is affected by temp based on ageGroup. 
+```{r}
+avgdata <- citisample %>%
+  group_by(mergedate, agegroup) %>%
+  summarize(count = n(),
+            dist = mean(distance, na.rm = TRUE),
+            dur = mean(tripduration, na.rm = TRUE),
+            speed = dist/dur)
+combined_age <- merge(avgdata, weather, by.x = "mergedate", by.y = "DATE")
+
+# Make a set of plots
+baseplot_age <- ggplot(data = combined_age, aes(x = TAVG, y = count))
+baseplot_age + geom_line() + geom_smooth() + facet_wrap(~ agegroup)
+```
+
 #### Next, we will look at how temperature affects average speed of rides. 
 ```{r}
 # Impact of temperature
@@ -190,6 +206,39 @@ baseplot + geom_line() + geom_smooth()
 ```
 The peak number of rides occurs when wind speed is 2.5, which suggests that people enjoy biking when there is a bit of a breeze outside. However, anything more than that and the number of rides begins to decrease steadily as wind increases. 
 
+#### We looked at how this differs across demographics.
+##### First, 
+```{r}
+baseplot_Week <- ggplot(data = combined_Week, aes(x = AWND, y = count))
+baseplot_Week + geom_line() + geom_smooth() + facet_wrap(~ dayid)
+baseplot_gender <- ggplot(data = combined_gender, aes(x = AWND, y = count))
+baseplot_gender + geom_line() + geom_smooth() + facet_wrap(~ gender)
+baseplot_userT <- ggplot(data = combined_userT, aes(x = AWND, y = count))
+baseplot_userT + geom_line() + geom_smooth() + facet_wrap(~ usertype)
+baseplot_age <- ggplot(data = combined_age, aes(x = AWND, y = count))
+baseplot_age + geom_line() + geom_smooth() + facet_wrap(~ agegroup)
+```
+#### We can also look at how Average wind Speed affects bike speed. 
+```{r}
+# Impact of Wind Speed
+baseplot <- ggplot(data = combined_avg, aes(x = AWND, y = speed))
+baseplot + geom_line() + geom_smooth()
+```
+We see that the speed actually slightly increases as wind increases, but only very slightly. 
+
+#### We looked at how this differs across demographics.
+##### First, 
+```{r}
+baseplot_Week <- ggplot(data = combined_Week, aes(x = AWND, y = speed))
+baseplot_Week + geom_line() + geom_smooth() + facet_wrap(~ dayid)
+baseplot_gender <- ggplot(data = combined_gender, aes(x = AWND, y = speed))
+baseplot_gender + geom_line() + geom_smooth() + facet_wrap(~ gender)
+baseplot_userT <- ggplot(data = combined_userT, aes(x = AWND, y = speed))
+baseplot_userT + geom_line() + geom_smooth() + facet_wrap(~ usertype)
+baseplot_age <- ggplot(data = combined_age, aes(x = AWND, y = speed))
+baseplot_age + geom_line() + geom_smooth() + facet_wrap(~ agegroup)
+```
+
 #### We can also look at the impact of rainfall on bike data
 
 ```{r}
@@ -197,7 +246,42 @@ The peak number of rides occurs when wind speed is 2.5, which suggests that peop
 baseplot <- ggplot(data = combined_avg, aes(x = PRCP, y = count))
 baseplot + geom_line() + geom_smooth()
 ```
+The most number of bike rides are taken on days with no precipitation, and then sharply decreases, but increases again before following a decreasing trend again. There is no real logical explanation for why the number of rides increases again, but looking at the graph we can see that in the increase there is a lack of data points, so we can attribute this to just not having enough data to properly populate our graph. We would have to take a different sample to confirm this. 
 
+#### We again looked at how this differs across demographics.
+##### First, 
+```{r}
+baseplot_Week <- ggplot(data = combined_Week, aes(x = PRCP, y = count))
+baseplot_Week + geom_line() + geom_smooth() + facet_wrap(~ dayid)
+baseplot_gender <- ggplot(data = combined_gender, aes(x = PRCP, y = count))
+baseplot_gender + geom_line() + geom_smooth() + facet_wrap(~ gender)
+baseplot_userT <- ggplot(data = combined_userT, aes(x = PRCP, y = count))
+baseplot_userT + geom_line() + geom_smooth() + facet_wrap(~ usertype)
+baseplot_age <- ggplot(data = combined_age, aes(x = PRCP, y = count))
+baseplot_age + geom_line() + geom_smooth() + facet_wrap(~ agegroup)
+```
+
+#### We can also look at how Precipitation affects bike speed. 
+```{r}
+# Impact of Wind Speed
+baseplot <- ggplot(data = combined_avg, aes(x = PRCP, y = speed))
+baseplot + geom_line() + geom_smooth()
+```
+
+#### We looked at how this differs across demographics.
+##### First, 
+```{r}
+baseplot_Week <- ggplot(data = combined_Week, aes(x = AWND, y = speed))
+baseplot_Week + geom_line() + geom_smooth() + facet_wrap(~ dayid)
+baseplot_gender <- ggplot(data = combined_gender, aes(x = AWND, y = speed))
+baseplot_gender + geom_line() + geom_smooth() + facet_wrap(~ gender)
+baseplot_userT <- ggplot(data = combined_userT, aes(x = AWND, y = speed))
+baseplot_userT + geom_line() + geom_smooth() + facet_wrap(~ usertype)
+baseplot_age <- ggplot(data = combined_age, aes(x = AWND, y = speed))
+baseplot_age + geom_line() + geom_smooth() + facet_wrap(~ agegroup)
+```
+
+#### Snow affect on bike data
 ```{r}
 # Impact of Snowfall
 baseplot <- ggplot(data = combined_avg, aes(x = SNOW, y = count))
@@ -209,5 +293,7 @@ baseplot + geom_line()
 baseplot <- ggplot(data = combined_avg, aes(x = SNWD, y = count))
 baseplot + geom_line()
 ```
+Unfortunately, as we can see from these two graphs, we do not have enough data points in 2019 where there was snow data, so we can't make any conclusions about how snow affects bike data. 
+
 
 
