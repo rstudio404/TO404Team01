@@ -1,0 +1,333 @@
+---
+title: "Group Project"
+author: "Wesley Chiu & Minglu Wang"
+date: "11/23/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Set up libraries here
+```{r}
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(geosphere)
+```
+
+```{r, cache=TRUE}
+# 
+# This section is for making the files, our group decided to use one common sample file instead
+# # First, I downloaded all the data files and extracted them to a folder within my project folder. 
+# 
+# # Next, I used this code to merge all the files. 
+# filenames <- list.files(path="C:/Users/wesle/Desktop/TO404/Final Group Project/MergeFolder", pattern="*.csv")
+# fullpath <- file.path("C:/Users/wesle/Desktop/TO404/Final Group Project/MergeFolder",filenames)
+# citibike <- do.call("rbind",lapply(fullpath,FUN=function(files){ read.csv(files)}))
+# 
+# # I then want to take a sample of this data to work with 
+# # Set a seed for the random sample so that the data is consistent
+# set.seed(42)
+# citisample <- sample_frac(citibike, size = .05)
+# # Free up memory by getting rid of initial merged file 
+# citibike <- NULL
+
+# Read in sample file
+citisample <- read.csv("sample19.csv")
+
+# then add weather data to the data frame
+weather <- read.csv("2019_NY_Weather.csv")
+weather$TAVG <- (weather$TMAX + weather$TMIN)/2
+```
+
+#### Clean and prepare dataset for analysis
+```{r}
+# Transform variables
+citisample$start.station.id <- as.factor(citisample$start.station.id)
+citisample$end.station.id <- as.factor(citisample$end.station.id)
+citisample$bikeid <- as.factor(citisample$bikeid)
+citisample$usertype <- as.factor(citisample$usertype)
+citisample$gender <- as.factor(citisample$gender)
+
+# Extract some data from the date column 
+# Since the format of each time is the same, we can get day and month by extracting based on character position 
+citisample$day <- as.numeric(str_sub(as.character(citisample$starttime),9,10))
+citisample$month <- as.numeric(str_sub(as.character(citisample$starttime),6,7))
+# Put the day and month together to get dates, and we are only using 2019 data so hard code 2019
+citisample$date <- paste(citisample$month, "/", citisample$day, "/19",  sep = "")
+citisample$date <- as.Date(citisample$date, format = "%m/%d/%y")
+# Extract weekend/weekday
+citisample$DoW <- format(citisample$date, "%u")
+citisample$dayid <- ifelse(citisample$DoW < 6, "Weekday", "Weekend")
+citisample$dayid <- as.factor(citisample$dayid)
+# Create another column for merging bike and weather data
+citisample$mergedate <- paste(citisample$month, "/", citisample$day, sep = "")
+# Lastly, format day and month as factors for visualizations
+citisample$day <- as.factor(citisample$day)
+citisample$month <- as.factor(citisample$month)
+# Also, extract hour from the starttime
+citisample$hour <- as.numeric(str_sub(as.character(citisample$starttime), 12, 13))
+
+# Extract morning/afternoon/evening
+citisample$period <- ifelse(citisample$hour < 6, "evening",
+                            ifelse(citisample$hour <= 12, "morning",
+                                   ifelse(citisample$hour <= 18, "afternoon","evening"))
+                            )
+citisample$hour <- as.factor(citisample$hour)
+# Create a column for approximate age, and one for age group.
+citisample$age <- 2020 - citisample$birth.year
+citisample$agegroup <- ifelse(citisample$age < 20, "<20", ifelse(citisample$age < 40, "20-40", "40+"))
+
+```
+
+```{r}
+# Calculating the distance (mi) travelled for each ride:
+R = 3958  # radius of earth in miles (at New York's latitude)
+citisample$distance <- distHaversine(cbind(citisample$start.station.longitude, citisample$start.station.latitude), cbind(citisample$end.station.longitude, citisample$end.station.latitude), R)
+
+# Fixing the date in the weather data so it matches the merge column in the bike data
+weather$DATE <- str_sub(weather$DATE, 1, nchar(as.character(weather$DATE))-5)
+
+```
+
+#### Create a table with data grouped by date
+```{r}
+avgdata <- citisample %>%
+  group_by(mergedate) %>%
+  summarize(count = n(),
+            dist = mean(distance, na.rm = TRUE),
+            dur = mean(tripduration, na.rm = TRUE),
+            speed = dist/dur)
+```
+
+#### Merge weather data and avg by date data
+```{r}
+combined_avg <- merge(avgdata, weather, by.x = "mergedate", by.y = "DATE")
+#str(combined_data)
+head(combined_avg)
+```
+
+#### Making graphs to show the relationships between different weather conditions and citibike data
+#### First, we look at impact of temperature on number of rides
+```{r}
+# Impact of temp (Took an average)
+baseplot <- ggplot(data = combined_avg, aes(x = TAVG, y = count))
+baseplot + geom_point(size = 3, alpha = 0.5) + geom_smooth()
+```
+Here we see that the number of bike rides follows a general upward trend until an average temperature of about 74 degrees, then the number of rides starts to decrease. We can also separate these averages by variables such as weekday/weekend and gender to see if there is a difference in the effect. 
+
+##### Looking at how number of rides is affected by temp during the weekdays/weekends. 
+```{r}
+# Seperate the avg data by weekday/weekend
+avgdata1 <- citisample %>%
+  group_by(mergedate, dayid) %>%
+  summarize(count = n(),
+            dist = mean(distance, na.rm = TRUE),
+            dur = mean(tripduration, na.rm = TRUE),
+            speed = dist/dur)
+combined_Week <- merge(avgdata1, weather, by.x = "mergedate", by.y = "DATE")
+
+# Make a set of plots
+baseplot_Week <- ggplot(data = combined_Week, aes(x = TAVG, y = count))
+baseplot_Week + geom_point(size = 3, alpha = 0.5) + geom_smooth() + facet_wrap(~ dayid)
+```
+We see that weekday and weekend look pretty similar, except that the weekend graph has a steeper slope going up to the peak at 74 degrees. This makes sense because during the weekend, people who are using bikes are more likely using them for leisure, and so they can easily decide not to use a bike if the temperature is not perfect. However, during the weekday, many bike riders are riding to work, and they have to use a bike no matter the temperature. 
+
+##### Looking at how number of rides is affected by temp based on gender. 
+```{r}
+avgdata2 <- citisample %>%
+  group_by(mergedate, gender) %>%
+  summarize(count = n(),
+            dist = mean(distance, na.rm = TRUE),
+            dur = mean(tripduration, na.rm = TRUE),
+            speed = dist/dur)
+combined_gender <- merge(avgdata2, weather, by.x = "mergedate", by.y = "DATE")
+
+# Make a set of plots
+baseplot_gender <- ggplot(data = combined_gender, aes(x = TAVG, y = count))
+baseplot_gender + geom_point(size = 2, alpha = 0.5) + geom_smooth() + facet_wrap(~ gender)
+```
+Here we run into the problem of having a large difference in ride numbers across genders, so it is hard to compare the graphs, but in general we can still see that the same curve of having the most number of rides at around 75 degrees is present across all gender categories. 
+
+##### Looking at how number of rides is affected by temp based on usertype. 
+```{r}
+avgdata3 <- citisample %>%
+  group_by(mergedate, usertype) %>%
+  summarise(count = n(),
+            dist = mean(distance, na.rm = TRUE),
+            dur = mean(tripduration, na.rm = TRUE),
+            speed = dist/dur)
+combined_userT <- merge(avgdata3, weather, by.x = "mergedate", by.y = "DATE")
+
+# Make a set of plots
+baseplot_userT <- ggplot(data = combined_userT, aes(x = TAVG, y = count))
+baseplot_userT + geom_point(size = 2, alpha = 0.5) + geom_smooth() + facet_wrap(~ usertype)
+```
+The same problem as before is here, where the number of total bikes is very different between customers and subscribers. It is obvious that subscribers contribute more to the number of ridership, and we can again see that the general curve is the same (peak at around 75 degrees). 
+
+##### Looking at how number of rides is affected by temp based on ageGroup. 
+```{r}
+avgdata <- citisample %>%
+  group_by(mergedate, agegroup) %>%
+  summarize(count = n(),
+            dist = mean(distance, na.rm = TRUE),
+            dur = mean(tripduration, na.rm = TRUE),
+            speed = dist/dur)
+combined_age <- merge(avgdata, weather, by.x = "mergedate", by.y = "DATE")
+
+# Make a set of plots
+baseplot_age <- ggplot(data = combined_age, aes(x = TAVG, y = count))
+baseplot_age + geom_point(size = 2, alpha = .5) + geom_smooth() + facet_wrap(~ agegroup)
+```
+
+#### Next, we will look at how temperature affects average speed of rides. 
+```{r}
+# Impact of temperature
+baseplot <- ggplot(data = combined_avg, aes(x = TAVG, y = speed))
+baseplot + geom_point(size = 3, alpha = 0.5) + geom_smooth()
+```
+We can see that average speed differs a lot, but the general trend is that average speed decreases as temperatures increase. 
+
+##### We can also see if different variables alter this relationship the same way we did with the affect of temperature on number of rides. 
+```{r}
+# Make a set of plots based on gender 
+baseplot_gender <- ggplot(data = combined_gender, aes(x = TAVG, y = speed))
+baseplot_gender + geom_point(size = 2, alpha = 0.5) + geom_smooth() + facet_wrap(~ gender)
+```
+This graph shows that on average, gender 0 is slower than the other genders, but the overall effect of increasing temperatures on speed does not change; there is still a slight decrease in speed as temperature rises. There is also a notable extra dip in the average speed of gender 0 around 74 degrees, which is interesting because that was also the peak in terms of number of rides. 
+
+```{r}
+# Make a set of plots based on dayid
+baseplot_Week <- ggplot(data = combined_Week, aes(x = TAVG, y = speed))
+baseplot_Week + geom_point(size = 3, alpha = 0.5) + geom_smooth() + facet_wrap(~ dayid)
+```
+During the weekdays, average speed declines slightly with temperature. During the weekend, average speed is at a maximum when it is around 40 degrees, and a minimum when it is at 65 degrees. 
+
+
+#### Next we look at the impact of wind speed on bike data
+```{r}
+# Impact of Wind Speed
+baseplot <- ggplot(data = combined_avg, aes(x = AWND, y = count))
+baseplot + geom_point(size = 3, alpha = 0.5) + geom_smooth()
+
+```
+The peak number of rides occurs when wind speed is 2.5, which suggests that people enjoy biking when there is a bit of a breeze outside. However, anything more than that and the number of rides begins to decrease steadily as wind increases. Intuitively, the speed increases as wind increases, but in detail, speed only increases slightly (even not increase) when wind speed is lower than 4 and between the range of 6 and 7.
+
+#### We looked at how this differs across demographics.
+##### First, 
+```{r}
+baseplot_Week <- ggplot(data = combined_Week, aes(x = AWND, y = count))
+baseplot_Week + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ dayid)
+baseplot_gender <- ggplot(data = combined_gender, aes(x = AWND, y = count))
+baseplot_gender + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ gender)
+baseplot_userT <- ggplot(data = combined_userT, aes(x = AWND, y = count))
+baseplot_userT + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ usertype)
+baseplot_age <- ggplot(data = combined_age, aes(x = AWND, y = count))
+baseplot_age + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ agegroup)
+```
+
+#### We can also look at how Average wind Speed affects bike speed. 
+```{r}
+# Impact of Wind Speed
+baseplot <- ggplot(data = combined_avg, aes(x = AWND, y = speed))
+baseplot + geom_point(size = 3, alpha = .5) + geom_smooth()
+```
+We see that the speed actually slightly increases as wind increases, but only very slightly. 
+
+#### We looked at how this differs across demographics.
+##### First, 
+```{r}
+baseplot_Week <- ggplot(data = combined_Week, aes(x = AWND, y = speed))
+baseplot_Week + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ dayid)
+baseplot_gender <- ggplot(data = combined_gender, aes(x = AWND, y = speed))
+baseplot_gender + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ gender)
+baseplot_userT <- ggplot(data = combined_userT, aes(x = AWND, y = speed))
+baseplot_userT + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ usertype)
+baseplot_age <- ggplot(data = combined_age, aes(x = AWND, y = speed))
+baseplot_age + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ agegroup)
+```
+
+#### We can also look at the impact of rainfall on bike data
+
+```{r}
+# Impact of Rain
+baseplot <- ggplot(data = combined_avg, aes(x = PRCP, y = count))
+baseplot + geom_point(size = 3, alpha = 0.5) + geom_smooth()
+
+```
+Basically, the number of rides decreases when it rains more. However, there will be a trough at around 0.1 PRCP and a second peak around 0.2 PRCP, which could be because when it's just a light rain, people prefer to walk with an umbrella, while when it rains a little bit heavier people prefer to ride to shorten their time on the way. As PRCP increases continuously, people seldom wants to ride in the heavy rain. It's really interesting but also confusing to see a trend up at the large range of PRCP. Since the data points is few, maybe some specific events happens on those days which caused lots of people use citibikes. 
+
+#### We again looked at how this differs across demographics.
+##### First, 
+```{r}
+baseplot_Week <- ggplot(data = combined_Week, aes(x = PRCP, y = count))
+baseplot_Week + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ dayid)
+baseplot_gender <- ggplot(data = combined_gender, aes(x = PRCP, y = count))
+baseplot_gender + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ gender)
+baseplot_userT <- ggplot(data = combined_userT, aes(x = PRCP, y = count))
+baseplot_userT + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ usertype)
+baseplot_age <- ggplot(data = combined_age, aes(x = PRCP, y = count))
+baseplot_age + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ agegroup)
+```
+
+```{r}
+# impact of rain on speed
+combined_avg %>%
+  ggplot(aes(PRCP, speed)) +
+  geom_point(size = 3, alpha = 0.5) + geom_smooth()
+
+# taking the relationship between wind speed and PRCP into consideration
+combined_avg %>%
+  ggplot(aes(PRCP, AWND)) +
+  geom_point(size = 3, alpha = 0.5) + geom_smooth()
+```
+
+Generally speaking, the speed will be faster as the PRCP increases which matches our common sense because everyone wants to arrive the destination as quick as possible when it rains. If we take the relationship between wind speed and PRCP into consideration, the wind also has some influences on riding speed. For example, the trough around 0.25 PRCP may be related to the lower wind.
+
+#### In addition, we want to explore if things changes at different period of the day.
+
+```{r}
+# The impact of rain on ridership and speed in the different period of the day
+avgdata_period <- citisample %>%
+  group_by(mergedate, period, dayid) %>%
+  summarize(count = n(),
+            dist = mean(distance, na.rm = TRUE),
+            dur = mean(tripduration, na.rm = TRUE),
+            speed = dist/dur)
+
+combined_period <- merge(avgdata_period, weather, by.x = "mergedate", by.y = "DATE")
+
+# impact on ridership
+baseplot_period <- ggplot(data = combined_period, aes(x = PRCP, y = count))
+baseplot_period + geom_point(size = 3, alpha = 0.5) + geom_smooth() + facet_wrap(~period)
+
+```
+We define morning from 6 am to 12 pm, afternoon from 12 pm to 18 pm and the rest is assigned to evening. The pattern at different period is similar to the overall one above, but the fluctuation is smaller in the evening. The ridership is slightly bigger in the afternoon than morning especially when there is no rains.
+
+```{r}
+
+# impact on speed
+baseplot_period <- ggplot(data = combined_period, aes(x = PRCP, y = speed))
+baseplot_period + geom_point(size = 3, alpha = 0.5) + geom_smooth() + facet_grid(dayid~period)
+
+```
+Although the ridership is more in the afternoon, the average speed is slower than that of morning on weekdays, while similar level to that in the evening. This may indicates that people are more likely in a rush when they go to the office. When it comes to weekend, the speeds in different period are at similar level.
+
+#### We also attempted to take a look at how snow affects bike data
+
+```{r}
+# Impact of Snowfall
+baseplot <- ggplot(data = combined_avg, aes(x = SNOW, y = count))
+baseplot + geom_line() 
+```
+
+```{r}
+# Impact of Snow Depth
+baseplot <- ggplot(data = combined_avg, aes(x = SNWD, y = count))
+baseplot + geom_line()
+```
+Unfortunately, as we can see from these two graphs, we do not have enough data points in 2019 where there was snow data, so we can't make any conclusions about how snow affects bike data. 
+
+
