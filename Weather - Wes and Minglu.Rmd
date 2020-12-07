@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, error = FALSE)
 ```
 
 #### Set up libraries here
@@ -17,7 +17,7 @@ library(ggplot2)
 library(geosphere)
 ```
 
-```{r, cache=TRUE}
+```{r}
 # 
 # This section is for making the files, our group decided to use one common sample file instead
 # # First, I downloaded all the data files and extracted them to a folder within my project folder. 
