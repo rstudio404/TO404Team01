@@ -50,6 +50,8 @@ citisample$end.station.id <- as.factor(citisample$end.station.id)
 citisample$bikeid <- as.factor(citisample$bikeid)
 citisample$usertype <- as.factor(citisample$usertype)
 citisample$gender <- as.factor(citisample$gender)
+# Fix gender
+citisample$gender <- ifelse(citisample$gender == 1, "male", ifelse(citisample$gender == 2, "female", "unknown"))
 
 # Extract some data from the date column 
 # Since the format of each time is the same, we can get day and month by extracting based on character position 
@@ -116,7 +118,8 @@ head(combined_avg)
 baseplot <- ggplot(data = combined_avg, aes(x = TAVG, y = count))
 baseplot + geom_point(size = 3, alpha = 0.5) + geom_smooth()
 ```
-Here we see that the number of bike rides follows a general upward trend until an average temperature of about 74 degrees, then the number of rides starts to decrease. We can also separate these averages by variables such as weekday/weekend and gender to see if there is a difference in the effect. 
+
+Here we see that the number of bike rides follows a general upward trend until an average temperature of around 72-77, then the number of rides starts to decrease. We can also separate these averages by variables such as weekday/weekend and gender to see if there is a difference in the effect. 
 
 ##### Looking at how number of rides is affected by temp during the weekdays/weekends. 
 ```{r}
@@ -133,7 +136,8 @@ combined_Week <- merge(avgdata1, weather, by.x = "mergedate", by.y = "DATE")
 baseplot_Week <- ggplot(data = combined_Week, aes(x = TAVG, y = count))
 baseplot_Week + geom_point(size = 3, alpha = 0.5) + geom_smooth() + facet_wrap(~ dayid)
 ```
-We see that weekday and weekend look pretty similar, except that the weekend graph has a steeper slope going up to the peak at 74 degrees. This makes sense because during the weekend, people who are using bikes are more likely using them for leisure, and so they can easily decide not to use a bike if the temperature is not perfect. However, during the weekday, many bike riders are riding to work, and they have to use a bike no matter the temperature. 
+
+We see that weekday and weekend look pretty similar, except that the weekend graph has a steeper slope going up to the peak. This makes sense because during the weekend, people who are using bikes are more likely using them for leisure, and so they can easily decide not to use a bike if the temperature is not perfect. However, during the weekday, many bike riders are riding to work, and they have to use a bike no matter the temperature. 
 
 ##### Looking at how number of rides is affected by temp based on gender. 
 ```{r}
@@ -149,7 +153,8 @@ combined_gender <- merge(avgdata2, weather, by.x = "mergedate", by.y = "DATE")
 baseplot_gender <- ggplot(data = combined_gender, aes(x = TAVG, y = count))
 baseplot_gender + geom_point(size = 2, alpha = 0.5) + geom_smooth() + facet_wrap(~ gender)
 ```
-Here we run into the pattern of having a large difference in ride numbers across genders (0=unknown, 1=male, 2=female), the male shows drastically larger ridership than the female, together with steeper up and down slope. This could be related to the gender structure of population, but also could be related to men's more physical strength. More data are needed for further analysis. Anyway, in general, we can still see that the same curve of having the most number of rides at around 75 degrees is present across all gender categories. 
+
+Here we run into the pattern of having a large difference in ride numbers across genders, the male shows drastically larger ridership than the female, together with steeper up and down slope. This could be due to the fact that there are simply more male riders than female riders. In general, we can still see that the same curve shape is present across all gender categories. 
 
 ##### Looking at how number of rides is affected by temp based on usertype. 
 ```{r}
@@ -165,7 +170,8 @@ combined_userT <- merge(avgdata3, weather, by.x = "mergedate", by.y = "DATE")
 baseplot_userT <- ggplot(data = combined_userT, aes(x = TAVG, y = count, colour = dayid))
 baseplot_userT + geom_point(size = 2, alpha = 0.5) + geom_smooth() + facet_wrap(~usertype)
 ```
-The same problem as before is here, where the number of total bikes is very different between customers and subscribers. It is obvious that subscribers contribute more to the number of ridership, and we can again see that the general curve is the same (peak at around 75 degrees). Interestingly, customers ride more at weekends than weekdays while subscribers shows the opposite. This indicates that most subscribers use citibikes as commuting vehicles, and most customers use them for leisure.
+
+The same pattern as before is here, where the number of total bikes is very different between customers and subscribers. It is obvious that subscribers contribute more to the number of ridership, and we can again see that the general curve is the same. Interestingly, customers ride more at weekends than weekdays while subscribers shows the opposite. This indicates that most subscribers use citibikes as commuting vehicles, and most customers use them for leisure.
 
 ##### Looking at how number of rides is affected by temp based on ageGroup. 
 ```{r}
@@ -181,6 +187,7 @@ combined_age <- merge(avgdata, weather, by.x = "mergedate", by.y = "DATE")
 baseplot_age <- ggplot(data = combined_age, aes(x = TAVG, y = count, colour = dayid))
 baseplot_age + geom_point(size = 2, alpha = .2) + geom_smooth() + facet_wrap(~ agegroup)
 ```
+
 From the perspective of weekday and weekend, it shows similar patterns to the overall influence by temp above between different age group. Moving to the difference of ridership between age groups, it is manifested that people within 20-40 ride most, and people over 40 years old follow, leaving young people under 20 with nearly no ridership. Lower ridership for people over 40 might be because they have enough financial support to own cars or other more comfortable ways than riding.
 
 #### Next, we will look at how temperature affects average speed of rides. 
@@ -189,6 +196,7 @@ From the perspective of weekday and weekend, it shows similar patterns to the ov
 baseplot <- ggplot(data = combined_avg, aes(x = TAVG, y = speed))
 baseplot + geom_point(size = 3, alpha = 0.5) + geom_smooth()
 ```
+
 We can see that average speed differs a lot, but the general trend is that average speed decreases as temperatures increase. 
 
 ##### We can also see if different variables alter this relationship the same way we did with the affect of temperature on number of rides. 
@@ -199,7 +207,8 @@ We can see that average speed differs a lot, but the general trend is that avera
 baseplot_gender <- ggplot(data = combined_gender, aes(x = TAVG, y = speed))
 baseplot_gender + geom_point(size = 2, alpha = 0.5) + geom_smooth() + facet_wrap(~ gender)
 ```
-This graph shows that on average, people whose gender is unknown are slower than the other genders, and women's speed drop faster than men as the temp increases. But the overall effect of increasing temperatures on speed does not change; there is still a slight decrease in speed as temperature rises. There is also a notable extra dip in the average speed of gender 0 around 74 degrees, which is interesting because that was also the peak in terms of number of rides. Maybe busy traffic limits the speed. 
+
+This graph shows that on average, people whose gender is unknown are slower than the other genders, and women's speed drop faster than men as the temp increases. But the overall effect of increasing temperatures on speed does not change; there is still a slight decrease in speed as temperature rises. There is also a notable extra dip in the average speed of gender 0 at higher temps, which is interesting because that was also the peak in terms of number of rides. Maybe busy traffic limits the speed. 
 
 ##### The influence of average temperature on speed based on weekday/weekend.
 
@@ -208,13 +217,15 @@ This graph shows that on average, people whose gender is unknown are slower than
 baseplot_Week <- ggplot(data = combined_Week, aes(x = TAVG, y = speed))
 baseplot_Week + geom_point(size = 3, alpha = 0.5) + geom_smooth() + facet_wrap(~ dayid)
 ```
-During the weekdays, average speed declines slightly with temperature. During the weekend, average speed is at a maximum when it is around 40 degrees, and a minimum when it is at 65 degrees. This strange pattern is hard to explain based on exsiting data, but we can speculate that maybe when it's too cold or hot, people prefer to ride faster to arrive their destination as soon as possible. While as the temp is closing to 74 degrees, people feel more comfortable and prefer to enjoy the riding. 
+
+During the weekdays, average speed declines slightly with temperature. During the weekend, average speed is at a maximum when it is around 40 degrees, and a minimum when it is at 65 degrees. This strange pattern is hard to explain based on existing data, but we can speculate that maybe when it's too cold or hot, people prefer to ride faster to arrive their destination as soon as possible. While as the temp is closing to 74 degrees, people feel more comfortable and prefer to enjoy the riding. 
 
 ```{r}
 # Make a set of plots
 baseplot_age <- ggplot(data = combined_age, aes(x = TAVG, y = speed, colour = dayid))
 baseplot_age + geom_point(size = 2, alpha = .2) + geom_smooth() + facet_wrap(~ agegroup)
 ```
+
 The overall patterns of weeday and weekend are similar to the graphs above, but slight discrepancies exsit between age groups. For young people (under 20), the slopes are steeper all the time, significantly smaller ridership when average temp increases. For people between 20 to 40, there's no huge change of speed on weekdays. This makes sense because when they are riding to work, time is limited. 
 
 #### Next we look at the impact of wind speed on bike data
@@ -224,7 +235,8 @@ baseplot <- ggplot(data = combined_avg, aes(x = AWND, y = count))
 baseplot + geom_point(size = 3, alpha = 0.5) + geom_smooth()
 
 ```
-The peak number of rides occurs when wind speed is 2.5, which suggests that people enjoy biking when there is a bit of a breeze outside. However, anything more than that and the number of rides begins to decrease steadily as wind increases. Intuitively, the speed increases as wind increases, but in detail, speed only increases slightly (even not increase) when wind speed is lower than 4 and between the range of 6 and 7.
+
+The peak number of rides occurs when wind speed is a little more than 0, which suggests that people enjoy biking when there is a bit of a breeze outside. However, anything more than that and the number of rides begins to decrease steadily as wind increases. 
 
 #### We looked at how this differs across demographics.
 ##### First, 
@@ -233,16 +245,13 @@ baseplot_Week <- ggplot(data = combined_Week, aes(x = AWND, y = count, colour = 
 baseplot_Week + geom_point(size = 3, alpha = .5) + geom_smooth()
 baseplot_gender <- ggplot(data = combined_gender, aes(x = AWND, y = count, colour = dayid))
 baseplot_gender + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ gender)
-baseplot_userT <- ggplot(data = combined_userT, aes(x = AWND, y = count, colour = dayid))
-baseplot_userT + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ usertype)
-baseplot_age <- ggplot(data = combined_age, aes(x = AWND, y = count, colour = dayid))
-baseplot_age + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ agegroup)
 ```
-From the first graph, it is evident that ridership on weekday is slightly higher than that of weekend, while the number of rides fluctuates smaller than that of weekend. On weekends, the first peak appears around AWND = 2.5, with the second one around AWND = 5.2. This implies people's preference of riding outside at weekend to some degree.
+
+From the first graph, it is evident that fluctuates smaller than that of weekend. On weekends, there are two different peaks on the graph of the sample data we used, but is still decreasing overall. 
 
 In the second graph, the patterns are similar to the overall one. Meanwhile, the order of the number of rides, male > female > unknown gender, is consistent with the analysis based on gender in the temp part.
 
-Graphs based on gender and age groups display the same trend. In detail, the differences between weekday and weekend for customers and subscribers and among different age groups are identical with that in temperature part. 
+Graphs based on and age groups and user type displayed the same trend. The differences between customers and subscribers and among different age groups are identical with that in temperature part, so we did not include these graphs. 
 
 
 #### We can also look at how Average wind Speed affects bike speed. 
@@ -251,6 +260,7 @@ Graphs based on gender and age groups display the same trend. In detail, the dif
 baseplot <- ggplot(data = combined_avg, aes(x = AWND, y = speed))
 baseplot + geom_point(size = 3, alpha = .5) + geom_smooth()
 ```
+
 We see that the speed actually slightly increases as wind increases, but only very slightly. This is common as wind does favor to speed when we are following the wind. 
 
 #### We looked at how this differs across demographics.
@@ -258,18 +268,15 @@ We see that the speed actually slightly increases as wind increases, but only ve
 ```{r}
 baseplot_Week <- ggplot(data = combined_Week, aes(x = AWND, y = speed))
 baseplot_Week + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ dayid)
-baseplot_gender <- ggplot(data = combined_gender, aes(x = AWND, y = speed))
-baseplot_gender + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ gender)
 baseplot_userT <- ggplot(data = combined_userT, aes(x = AWND, y = speed, colour = dayid))
 baseplot_userT + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ usertype)
 baseplot_age <- ggplot(data = combined_age, aes(x = AWND, y = speed, colour = dayid))
 baseplot_age + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ agegroup)
 ```
+
 From the first graph, the speed on weekdays doesn't increase considerably as the wind speed increases while the speed on weekends shows the opposite. This could be because people are not flexible in choosing riding direction on their way to work, which means someone have to ride against the wind, impeding the increase of average speed based on the sample. However, people have more rights to choose their destination, so they prefer to choose the direction following the wind.
 
-In the second graph, the overall trend among genders is similar to that of temperature part. And men shows stronger physical abilities to maintain higher speed.
-
-Moving to the third graph, subscribers' speed is higher drastically than that of customers. From the website of our dataset resource, we learned that customer is defined as 24-hour pass or 3-day pass user. We think these people are more likely to be visitors which tend to pursue relax and comfort during their trips. On the contrary, we know that most subscribers are riding to work from our previous analysis. Thus, it's easy to understand that their faster speed is to save time. 
+Moving to the second graph, subscribers' speed is higher drastically than that of customers. From the website of our dataset resource, we learned that customer is defined as 24-hour pass or 3-day pass user. We think these people are more likely to be visitors which tend to pursue relax and comfort during their trips. On the contrary, we know that most subscribers are riding to work from our previous analysis. Thus, it's easy to understand that their faster speed is to save time. 
 
 People from 20 to 40 seems to be faster which could be assigned to their stronger physical bodies. The steeper up slope in the higher wind speed range for young people (under 20) could indicate their preference of pursuing speed and excitement. In this case, they will require bikes with higher quality.
 
@@ -281,6 +288,7 @@ baseplot <- ggplot(data = combined_avg, aes(x = PRCP, y = count))
 baseplot + geom_point(size = 3, alpha = 0.5) + geom_smooth()
 
 ```
+
 Basically, the number of rides decreases when it rains more. However, there will be a trough at around 0.1 PRCP and a second peak around 0.2 PRCP, which could be because when it's just a light rain, people prefer to walk with an umbrella or some people don't care about small rain. While when it rains a little bit heavier people prefer to ride to shorten their time on the way. As PRCP increases continuously, people seldom wants to ride in the heavy rain or choose alternative vehicles. It's really interesting but also confusing to see a trend up at the large range of PRCP. Since the data points is few, maybe some specific events happens on those days which caused lots of people use citibikes. 
 
 #### We again looked at how this differs across demographics.
@@ -288,16 +296,11 @@ Basically, the number of rides decreases when it rains more. However, there will
 ```{r}
 baseplot_Week <- ggplot(data = combined_Week, aes(x = PRCP, y = count, colour = dayid))
 baseplot_Week + geom_point(size = 3, alpha = .5) + geom_smooth()
-baseplot_gender <- ggplot(data = combined_gender, aes(x = PRCP, y = count, colour = dayid))
-baseplot_gender + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ gender)
-baseplot_userT <- ggplot(data = combined_userT, aes(x = PRCP, y = count, colour = dayid))
-baseplot_userT + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ usertype)
-baseplot_age <- ggplot(data = combined_age, aes(x = PRCP, y = count, colour = dayid))
-baseplot_age + geom_point(size = 3, alpha = .5) + geom_smooth() + facet_wrap(~ agegroup)
 ```
-Except for the explanation already included above, there may be some new insights from the impact of precipitation on ridership.
 
 There is an apparent peak in the curve of weekend in the first graph, even going beyond the curve of weekday. This is also at point around the slight peak of weekday. We infer that it could be because people care more about their appearance on weekdays. So they may choose other ways to work. Such worries don't matter on weekends.
+
+Graphs based on and age groups, user type, and gender displayed the same trend as the general graph with no interesting findings, so we did not include these graphs. 
 
 
 ```{r}
@@ -330,8 +333,8 @@ combined_period <- merge(avgdata_period, weather, by.x = "mergedate", by.y = "DA
 # impact on ridership
 baseplot_period <- ggplot(data = combined_period, aes(x = PRCP, y = count))
 baseplot_period + geom_point(size = 3, alpha = 0.5) + geom_smooth() + facet_wrap(~period)
-
 ```
+
 We define morning from 6 am to 12 pm, afternoon from 12 pm to 18 pm and the rest is assigned to evening. The pattern at different period is similar to the overall one above, but the fluctuation is smaller in the evening. The ridership is slightly bigger in the afternoon than morning especially when there is no rains.
 
 ```{r}
@@ -341,6 +344,7 @@ baseplot_period <- ggplot(data = combined_period, aes(x = PRCP, y = speed, colou
 baseplot_period + geom_point(size = 3, alpha = 0.5) + geom_smooth() + facet_grid(~period)
 
 ```
+
 Although the ridership is more in the afternoon, the average speed is slower than that of morning on weekdays, while similar level to that in the evening. This may indicates that people are more likely in a rush when they go to the office. When it comes to weekend, the speeds in different period are at similar level.
 
 #### We also attempted to take a look at how snow affects bike data
@@ -356,6 +360,7 @@ baseplot + geom_line()
 baseplot <- ggplot(data = combined_avg, aes(x = SNWD, y = count))
 baseplot + geom_line()
 ```
+
 Unfortunately, as we can see from these two graphs, we do not have enough data points in 2019 where there was snow data, so we can't make any conclusions about how snow affects bike data. 
 
 
