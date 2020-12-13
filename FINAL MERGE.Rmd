@@ -1,0 +1,1894 @@
+---
+title: "Group Project"
+author: "Wesley Chiu, Minglu Wang, Josh Hartman, Jane Zhou, Lena Ivens"
+date: "11/23/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, error = FALSE)
+```
+
+#### Set up libraries here
+```{r}
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(geosphere)
+library(hans)
+library(scales)
+library(leaflet)
+library(sp)
+library(ggmap)
+library(maptools)
+library(httr)
+library(gganimate)
+```
+
+```{r}
+# 
+# This section is for making the files, our group decided to use one common sample file instead
+# # First, I downloaded all the data files and extracted them to a folder within my project folder. 
+# 
+# # Next, I used this code to merge all the files. 
+# filenames <- list.files(path="C:/Users/wesle/Desktop/TO404/Final Group Project/MergeFolder", pattern="*.csv")
+# fullpath <- file.path("C:/Users/wesle/Desktop/TO404/Final Group Project/MergeFolder",filenames)
+# citibike <- do.call("rbind",lapply(fullpath,FUN=function(files){ read.csv(files)}))
+# 
+# # I then want to take a sample of this data to work with 
+# # Set a seed for the random sample so that the data is consistent
+# set.seed(42)
+# citisample <- sample_frac(citibike, size = .05)
+# # Free up memory by getting rid of initial merged file 
+# citibike <- NULL
+
+# Read in sample file
+rawdata <- read.csv("sample19.csv")
+
+# then add weather data to the data frame
+weather <- read.csv("2019_NY_Weather.csv")
+weather$TAVG <- (weather$TMAX + weather$TMIN)/2
+```
+
+#### Clean and prepare dataset for analysis
+```{r}
+citisample <- rawdata
+# Transform variables
+citisample$start.station.id <- as.factor(citisample$start.station.id)
+citisample$end.station.id <- as.factor(citisample$end.station.id)
+citisample$bikeid <- as.factor(citisample$bikeid)
+citisample$usertype <- as.factor(citisample$usertype)
+citisample$gender <- as.factor(citisample$gender)
+# Fix gender
+citisample$gender <- ifelse(citisample$gender == 1, "male", ifelse(citisample$gender == 2, "female", "unknown"))
+
+# Extract some data from the date column 
+# Since the format of each time is the same, we can get day and month by extracting based on character position 
+citisample$day <- as.numeric(str_sub(as.character(citisample$starttime),9,10))
+citisample$month <- as.numeric(str_sub(as.character(citisample$starttime),6,7))
+# Put the day and month together to get dates, and we are only using 2019 data so hard code 2019
+citisample$date <- paste(citisample$month, "/", citisample$day, "/19",  sep = "")
+citisample$date <- as.Date(citisample$date, format = "%m/%d/%y")
+# Extract weekend/weekday
+citisample$DoW <- format(citisample$date, "%u")
+citisample$dayid <- ifelse(citisample$DoW < 6, "Weekday", "Weekend")
+citisample$dayid <- as.factor(citisample$dayid)
+# Create another column for merging bike and weather data
+citisample$mergedate <- paste(citisample$month, "/", citisample$day, sep = "")
+# Lastly, format day and month as factors for visualizations
+citisample$day <- as.factor(citisample$day)
+citisample$month <- as.factor(citisample$month)
+# Also, extract hour from the starttime
+citisample$hour <- as.numeric(str_sub(as.character(citisample$starttime), 12, 13))
+
+# Extract morning/afternoon/evening
+citisample$period <- ifelse(citisample$hour < 6, "evening",
+                            ifelse(citisample$hour <= 12, "morning",
+                                   ifelse(citisample$hour <= 18, "afternoon","evening"))
+                            )
+citisample$hour <- as.factor(citisample$hour)
+# Create a column for approximate age, and one for age group.
+citisample$age <- 2020 - citisample$birth.year
+citisample$agegroup <- ifelse(citisample$age < 20, "<20", ifelse(citisample$age < 40, "20-40", "40+"))
+
+```
+
+#### Copy data into set for analysis
+```{r}
+sample19 <- citisample
+```
+
+### Bikes
+```{r}
+# make column that specifies distance per trip in miles
+sample19$distance <- haversine(sample19$start.station.latitude, sample19$start.station.longitude, sample19$end.station.latitude, sample19$end.station.longitude)*0.621371
+
+# group sample by bikeid and distance
+bikes <- sample19 %>% 
+  group_by(bikeid) %>%
+  mutate(distance_per_bike = sum(distance)) %>%
+  mutate(trips_per_bike = n())
+
+# remove duplicate bikeids and create new data frame
+bikes1 <- select(bikes, bikeid, distance_per_bike, trips_per_bike)
+bikes1 <- bikes1[!duplicated(bikes1$bikeid), ]
+
+# create a scatter plot with distance and number of trips
+plot_a <- ggplot(data = bikes1, aes(x = trips_per_bike, y = distance_per_bike, colour = distance_per_bike)) + geom_point(size=1, alpha=0.5) + scale_colour_gradient(low="greenyellow", high="darkgreen") + theme(legend.position = "none")
+plot_a
+
+# identify the most and least used bikes
+mostusedbikes <- head(bikes1[order(bikes1$distance_per_bike, decreasing = TRUE),], n = 100)
+mostusedbikes
+leastusedbikes <- tail(bikes1[order(bikes1$distance_per_bike, decreasing = TRUE),], n = 100)
+leastusedbikes
+```
+
+- Some bikes have been used more than others, which may be an indicator for Citi Bike to check them for maintenance as the tires could be wearing out. As we can see, the distance traveled ranges from 0 miles to `r round(max(bikes1$distance_per_bike),2)` miles. The scatterplot reveals that there is no unusual pattern since the more a bike is booked the greater the distance traveled. 
+
+```{r}
+# create bar plot with num_trips on x_axis
+plot_b <- ggplot(data=bikes1, aes(x=trips_per_bike, fill=..count..)) + geom_bar() + scale_fill_gradient(low="greenyellow", high="darkgreen") + theme(legend.position = "none")
+plot_b
+
+# find quartiles along with extreme percentiles of num_trips
+quantile_num_trips <- quantile(bikes1$trips_per_bike, probs=c(0.01,0.05,0.1,0.25,0.5,0.75,0.9,0.95,0.99,1))
+quantile_num_trips
+```
+- The distribution of the number of trips each bike made in 2019 is skewed right with the mean `r round(mean(bikes1$trips_per_bike),0)` being greater than the median `r quantile_num_trips[5]`.
+- Bike `r bikes1$bikeid[bikes1$trips_per_bike == max(bikes1$trips_per_bike)]` has been used the most times with `r max(bikes1$trips_per_bike)` trips made. Although it may not be the bike that traveled the most distance, it should still have traveled a fair amount as there is a strong positive correlation between number of trips and distance traveled (seen in the scatterplot above). One possible reason could be because Bike `r bikes1$bikeid[bikes1$trips_per_bike == max(bikes1$trips_per_bike)]` has always been circulating in the busier parts of NYC where people tend to bike shorter distances but more frequently.
+- 1% of the bikes have only been used `r quantile_num_trips[1]` times or less throughout the whole year. This could be because:
+  + They have been taken away for maintenance.
+  + There is something wrong with them and should be checked for maintenance.
+  + They were taken to unpopular stations that tend to have a lot of bike surplus and by chance were rarely selected by bikers to ride. 
+
+### Gender 
+```{r}
+# create bar plot with gender on x-axis 
+plot1 <- ggplot(data=sample19, aes(x=gender, fill=..count..)) + geom_bar() + scale_fill_gradient(low="greenyellow", high="darkgreen") + labs(x="gender") + theme(legend.position = "none")
+plot1
+```
+
+- Almost three times as many males ride Citi Bikes as females.
+
+### Age
+```{r}
+# create histogram plotting age
+plot2 <- ggplot(data=sample19, aes(x=age, fill=..count..)) + geom_histogram(binwidth=1) + scale_fill_gradient(low="greenyellow", high="darkgreen")
+plot2
+```
+
+- Most Citi Bikers are in their mid-20s to late-40s (the average age is `r round(mean(sample19$age), 0)`).
+- Interesting peak at 50. Is exercising more and being healthy a common new year's resolution for 50 year olds?
+- The youngest Citi Biker is `r min(sample19$age, na.rm = TRUE)`.
+- The oldest Citi Biker is `r max(sample19$age, na.rm = TRUE)`.
+
+### User Type
+**FREQUENCY**
+```{r}
+# create bar plot with user type on x-axis 
+plot3 <- ggplot(data=sample19, aes(x=usertype, fill=usertype)) + geom_bar() + scale_fill_manual(values=c("chartreuse3", "darkgreen")) + theme(legend.position = "none")
+plot3
+```
+
+- There are about six times as many subscribers as regular customers.
+
+**TRIP DURATION**
+```{r}
+# create violin plot with user type on x-axis and trip duration on y-axis
+plot4 <- ggplot(data=sample19, aes(x=usertype, y=tripduration, fill=usertype)) + geom_violin() + scale_y_log10() + scale_fill_manual(values=c("darkgreen", "chartreuse3")) + theme(legend.position = "none")
+plot4
+```
+
+- Subscribers tend to bike for shorter durations than regular customers, which makes sense because subscribers are probably NYC locals. They can ride Citi Bikes whenever they want, and they ride more for the purpose of getting from one place to another efficiently (unlike tourists who might spend more time biking around leisurely).
+
+### Number of Trips
+**OVER A DAY**
+```{r}
+# extract hour from start time and save to new column
+sample19$hour <- substring(sample19$starttime, 12, 13)
+
+# create bar plot with hour on x-axis
+plot5 <- ggplot(data=sample19, aes(x=hour, fill=..count..)) + geom_bar() + scale_fill_gradient(low="greenyellow", high="darkgreen")
+plot5
+```
+
+- The number of trips peak around 8-9am and 5-6pm (rush hours), which suggests that many people use Citi Bike to get to and from school and work.
+- The number of trips rises throughout the afternoon perhaps as a result of students getting off from school.
+
+**OVER A WEEK**
+```{r}
+# extract date from start time, convert to day of the week, and save to new column
+sample19$day <- weekdays(as.Date(substring(sample19$starttime, 1, 10))) 
+
+# order the bars
+sample19$day <- factor(sample19$day,levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
+
+# create bar plot with day of the week on x-axis
+plot6 <- ggplot(data=sample19, aes(x=day, fill=day)) + geom_bar() + scale_fill_manual(values=c("darkgreen", "darkgreen", "darkgreen", "darkgreen", "darkgreen", "chartreuse3", "chartreuse3")) + theme(legend.position = "none")
+plot6
+```
+
+- Less people use Citi Bike on weekends, especially on Sundays. This graph supports the hypothesis that the customer base of Citi Bike is primarily composed of workers and students (some jobs and classes are Monday-Saturday). Also, Sunday is usually the day to rest - no work and less errands to run. 
+
+**OVER A YEAR**
+```{r}
+# create bar plot with month on x-axis
+plot7 <- ggplot(data=sample19, aes(x=month, fill=..count..)) + geom_bar() + scale_fill_gradient(low="greenyellow", high="darkgreen")
+plot7
+```
+
+- People use Citi Bike the most during September, perhaps because  of the nice weather and the fact that students have started school again.
+- Less people use Citi Bike during the winter, most likely because snow and ice make the sidewalks and roads slippery (safety hazard). There is a sharp decline in trips during November and December, which is generally when it begins snowing in NYC.
+
+## The Average Citi Biker
+- male
+- young or middle-aged adult
+- NYC area resident
+- student or worker
+
+#### Clear all data except for the original sample
+```{r}
+rm(list=setdiff(ls(), c("citisample","rawdata", "weather")))
+```
+
+#### Copy data for asymmetric data analysis
+```{r}
+citibikesample <- rawdata
+```
+
+# Asymmetry Maps
+```{r}
+#setup for following r chunks
+# convert relevant fields to factors
+
+citibikesample$bikeid <- as.factor(citibikesample$bikeid)
+
+#convert 1 and 2 to m and f
+
+citibikesample$gender <- ifelse(citibikesample$gender == 1| citibikesample$gender == "M", "M",ifelse(citibikesample$gender == 2| citibikesample$gender ==  "F","F", NA))
+  
+citibikesample$gender<- as.factor(citibikesample$gender)
+
+#making a new data.frame that maps count of visits to start staion id
+freqstartstationid <- count(citibikesample, start.station.id)
+freqstartstationid<- freqstartstationid[order(freqstartstationid$n, decreasing = TRUE),]
+
+#merging this df with existing one by start station id, will add new column n which is the count of the start station id in the original df
+freqstartcitibikesample <- merge(citibikesample, freqstartstationid, by.x = "start.station.id", by.y = "start.station.id")
+freqstartcitibikesample$n -> freqstartcitibikesample$start.station.count
+
+#taking top occuring start stations and making them a new df, topstartstation
+#because the top start stations occur thousands of times, used count of start stations * 2 to get number of rows to include
+topstartstation <- head(freqstartcitibikesample[order(freqstartcitibikesample$n, decreasing = TRUE),], n= sum(freqstartstationid[1:3,2]))
+topstartstation <- topstartstation[,c(1,6:7, 16:17)]
+#get tail of df to display lower occuring start stations and name bottomstartstation
+bottomstartstation <- tail(freqstartcitibikesample[order(freqstartcitibikesample$n, decreasing = TRUE), ], n=10)
+#repeat for end stations
+freqendstationid <- count(citibikesample, end.station.id)
+#repeating merge but by end station id
+freqendcitibikesample <- merge(citibikesample, freqendstationid, by.x = "end.station.id", by.y = "end.station.id")
+#taking top occuring end stations and making them a new df, topendstation
+#because the top end stations occur thousands of times, used count of end stations * 2 to get number of rows to include
+topendstation <- head(freqendcitibikesample[order(freqendcitibikesample$n, decreasing = TRUE),], n= max(freqendcitibikesample$n)*2)
+#get tail of this df to display lower occuring end stations
+bottomendstation <- tail(freqendcitibikesample[order(freqendcitibikesample$n, decreasing = TRUE), ], n=10)
+
+#make df to show assym
+#make data frame that has lat and long for each start station
+locationinfo <- freqstartcitibikesample[,c(1,6,7)]
+
+#merging counts for start and end stations and then merging with location info
+assymstation <- merge(freqstartstationid, freqendstationid, by.x = "start.station.id", by.y = "end.station.id")
+assymstation_location <- merge(locationinfo, assymstation, by.x = "start.station.id", by.y = "start.station.id")
+#removing duplicate rows
+assymtraffic <- assymstation_location[!duplicated(assymstation_location$start.station.id),]
+#making it easier to understand
+assymtraffic$start.station.id -> assymtraffic$station.id
+assymtraffic$n.x -> assymtraffic$count.start.station
+assymtraffic$n.y -> assymtraffic$count.end.station
+#getting rid of these columns
+assymtraffic$start.station.id <- NULL
+assymtraffic$n.x <- NULL
+assymtraffic$n.y <- NULL
+#making these vectors integers
+assymtraffic$count.start.station <- as.integer(assymtraffic$count.start.station)
+assymtraffic$count.end.station <- as.integer(assymtraffic$count.end.station)
+#creating new column that determines surplus or deficit by seeing the difference between occurences of start and end stations
+assymtraffic$difference <- c(assymtraffic$count.end.station - assymtraffic$count.start.station)
+#order so that difference is decreasing
+sortedassymstation <- assymtraffic[order(assymtraffic$difference, decreasing = TRUE),]
+summary(sortedassymstation$difference)
+```
+
+## Top 10 Stations with Surplus
+```{r}
+
+#making df with stations that have surplus
+surplusstations <- sortedassymstation[sortedassymstation$difference > 0, ]
+
+#get top 10 stations
+topsurplusstations <- head(surplusstations, n = 10)
+topsurplusstations$start.station.latitude <- as.numeric(topsurplusstations$start.station.latitude)
+topsurplusstations$start.station.longitude <- as.numeric(topsurplusstations$start.station.longitude)
+#using sortedassymstation df to make a leaflet showing stations used as an end station more than as a start station
+leaflet(topsurplusstations) %>%
+  addTiles()%>% 
+  addMarkers(data = topsurplusstations, lng = ~start.station.longitude, lat = ~start.station.latitude, popup = paste("Station ID:", topsurplusstations$station.id, "<br>", "Surplus:", topsurplusstations$difference)) %>% #adding markers with station id displayed and the surplus
+  setView(-73.96,40.75, zoom = 9)
+```
+
+## Top 10 Stations with Deficit
+```{r}
+#making df with stations that have surplus
+deficitstations <- sortedassymstation[sortedassymstation$difference < 0, ]
+
+#get top 10 stations
+bottomdeficitstations <- tail(deficitstations, n = 10)
+bottomdeficitstations$start.station.longitude <- as.numeric(bottomdeficitstations$start.station.longitude)
+#using sortedassymstation df to make a leaflet showing stations used as an end station more than as a start station
+leaflet(bottomdeficitstations) %>%
+  addTiles()%>% #adding map tiles
+  addMarkers(data = bottomdeficitstations, ~start.station.longitude, ~start.station.latitude, popup = paste("Station ID:", bottomdeficitstations$station.id, "<br>", "Deficit:", bottomdeficitstations$difference)) %>% #adding markers with station id displayed and the surplus
+  setView(-73.96,40.75, zoom = 9)
+```
+
+
+
+
+
+
+
+
+
+When observing these maps, we see that the stations with the largest defjcits are clustered around central park while the stations with the largest surpluses are around the southern end of Manhattan. The station with the highest deficit, station `r bottomdeficitstations$station.id[10]` is actually not far from the station with the highest surplus, `r topsurplusstations$station.id[1]`. Overall, this data suggests that it may be worthwhile to allocate larger bike reserves to these high deficit stations by pulling some bikes from the high surplus stations.
+
+# Asymmetry by Time
+## Top 5 Surplus and Top 5 Deficits By Day
+```{r}
+
+# lubridate package to get date times
+library("lubridate"); library("chron");library("timeDate")
+
+#getting relevant vectors from sample data
+datafortime <- citibikesample[,c(2:4,6:8,10:13)]
+
+#ymdhms format
+datafortime$starttime <- ymd_hms(datafortime$starttime)
+datafortime$stoptime <- ymd_hms(datafortime$stoptime)
+
+#make list of holidays 
+holidaylist <- c("USChristmasDay","USGoodFriday","USIndependenceDay","USLaborDay",
+    "USNewYearsDay","USThanksgivingDay") 
+
+#get dates of holidays for 2019
+myholidays  <- floor_date(ymd(as.character(holiday(2019,holidaylist)), "day"))
+
+#omit nas
+na.omit(myholidays) -> myholidays
+
+#make a df to later search for name of holiday associated with date
+Holidays <- data.frame(unlist(holidaylist, recursive = TRUE))
+Holidaydf <- cbind(Holidays,myholidays)
+
+#create new vectors for different time increments
+datafortime$month <- month(datafortime$starttime)
+datafortime$day <- floor_date(datafortime$starttime, "day")
+datafortime$hour <- hour(datafortime$starttime)
+datafortime$weekday <- weekdays(datafortime$starttime)
+datafortime$roundedhour <- floor_date(datafortime$starttime, "hour")
+
+#make a vector that determines whether a date is a holiday and returns the name of the holiday if it is, else "Not Holiday"
+datafortime$holiday <- ifelse(datafortime$day == myholidays[1]|datafortime$day == myholidays[2]|datafortime$day == myholidays[3]|datafortime$day == myholidays[4]|datafortime$day == myholidays[5]|datafortime$day == myholidays[6], Holidaydf[match(datafortime$day, Holidaydf$myholidays),1],"Not Holiday")
+
+#make a factor
+datafortime$holiday <- as.factor(datafortime$holiday)
+
+#get counts for start and end station ids by day
+startstationbyday <- count(datafortime, start.station.id, day)
+endstationbyday <- count(datafortime, end.station.id, day)
+
+#combine df's by station id and day
+combinedcountbyday <- merge(startstationbyday, endstationbyday, by.x = c("start.station.id","day"), by.y = c("end.station.id","day"))
+
+#make vector of surplus(deficit)
+combinedcountbyday$dif <- c(combinedcountbyday$n.y - combinedcountbyday$n.x)
+
+#define day as a date
+combinedcountbyday$day <- as.Date(combinedcountbyday$day)
+combinedcountbyday <- combinedcountbyday[order(combinedcountbyday$dif, decreasing = TRUE),]
+#stations with the 5 highest surplus
+topcombinedcountbyday <- combinedcountbyday[combinedcountbyday$start.station.id == combinedcountbyday[1,1]| combinedcountbyday$start.station.id == combinedcountbyday[2,1]|combinedcountbyday$start.station.id == combinedcountbyday[3,1]|combinedcountbyday$start.station.id == combinedcountbyday[4,1]|combinedcountbyday$start.station.id == combinedcountbyday[5,1],]
+
+#stations with the 5 highest deficits
+bottomcombinedcountbyday <- combinedcountbyday[combinedcountbyday$start.station.id == combinedcountbyday[nrow(combinedcountbyday),1]| combinedcountbyday$start.station.id == combinedcountbyday[nrow(combinedcountbyday)-1,1]|combinedcountbyday$start.station.id == combinedcountbyday[nrow(combinedcountbyday)-2,1]|combinedcountbyday$start.station.id == combinedcountbyday[nrow(combinedcountbyday)-3,1]|combinedcountbyday$start.station.id == combinedcountbyday[nrow(combinedcountbyday)-4,1],]
+#bind the rows of top and bottom 5 stations
+topbottombyday <- rbind(topcombinedcountbyday,bottomcombinedcountbyday)
+
+
+#make a line plot that plots surplus/deficit by day
+surplusplot <- ggplot(topbottombyday, aes(x= day, y= dif))+ geom_line(color = "darkgreen")+facet_wrap("start.station.id")+labs(x = "Date", y = "Difference")+theme(axis.text.x = element_text(angle=90, hjust=1))
+
+#group_by(combinedcountbyday, day)%>%
+ # summarise(
+  #  Dif = median(dif, na.rm = TRUE)
+  #)%>%
+  #ggplot(aes(x= day)) + geom_col(aes(y=Dif), fill = "darkgreen") +theme(axis.text.x = element_text(angle=90, hjust=1))
+
+
+#make barplot that shows surplus or deficit by day for top 5 and bottom 5 stations
+surplusbarplot <- ggplot(topbottombyday, aes(x= day)) + geom_col(aes(y=dif), fill = "darkgreen") + facet_wrap("start.station.id") +theme(axis.text.x = element_text(angle=90, hjust=1))
+surplusbarplot
+
+
+```
+
+
+
+
+
+
+
+
+
+
+From this we can see that the many of the stations with the highest surplus on a given day are also the stations with the highest deficit on a given day.This suggests that these stations are in high areas of traffic that varies in direction of flow day by day. In terms of implications, when allocating higher bike reserves to high deficit locations, these stations are going to change day to day - a station that today has the largest deficit may tommorow have the largest surplus. 
+
+## Monthly
+```{r}
+#make new df that counts start and end station by month
+startstationbymonth <- count(datafortime, start.station.id, month)
+endstationbymonth <- count(datafortime, end.station.id, month)
+
+#combine df's by station id and month
+combinedcountbymonth <- merge(startstationbymonth, endstationbymonth, by.x = c("start.station.id","month"), by.y = c("end.station.id","month"))
+
+#find surplus(deficit) and make a new vector
+combinedcountbymonth$dif <- c(combinedcountbymonth$n.y - combinedcountbymonth$n.x )
+
+#make a plot that shows median surplus(deficit) by month for all stations
+group_by(combinedcountbymonth, month)%>%
+summarise(
+  Dif = median(dif, na.rm = TRUE))-> medianmonth
+
+medianmonth <- as.data.frame(medianmonth)
+
+ggplot(data = medianmonth, aes(y= Dif))+geom_col(aes(x = month), fill = "darkgreen")+xlab("Month") + ylab("Surplus (Deficit)") +ggtitle("Median Surplus(Deficit) by Month")+scale_x_discrete(limit = c(1,2,3,4,5,6,7,8,9,10,11,12)) 
+
+#get count of each station for use as "index" to get a specified number of stations
+monthlycountedstation <- count(combinedcountbymonth, combinedcountbymonth$start.station.id)
+
+combinedcountbymonth[order(combinedcountbymonth$dif, decreasing = TRUE),1]-> combinedcountbymonth1 
+#stations with the 5 highest surplus
+topcombinedcountbymonth <- combinedcountbymonth[combinedcountbymonth$start.station.id == combinedcountbymonth1[1]| combinedcountbymonth$start.station.id == combinedcountbymonth1[2]|combinedcountbymonth$start.station.id == combinedcountbymonth1[3]|combinedcountbymonth$start.station.id == combinedcountbymonth1[4]|combinedcountbymonth$start.station.id == combinedcountbymonth1[5],]
+
+#stations with the 5 highest deficits
+bottomcombinedcountbymonth <- combinedcountbymonth[combinedcountbymonth$start.station.id == combinedcountbymonth1[length(combinedcountbymonth1)]| combinedcountbymonth$start.station.id == combinedcountbymonth1[length(combinedcountbymonth1)-1]|combinedcountbymonth$start.station.id == combinedcountbymonth1[length(combinedcountbymonth1)-2]|combinedcountbymonth$start.station.id == combinedcountbymonth1[length(combinedcountbymonth1)-3]|combinedcountbymonth$start.station.id == combinedcountbymonth1[length(combinedcountbymonth1)-4],]
+#bind the rows of top and bottom 5 stations
+topbottombymonth <- rbind(topcombinedcountbymonth,bottomcombinedcountbymonth)
+
+
+#make a plot that shows surplus(deficit) by month for 5 stations with highest surplus and 5 stations with highest deficit
+#head(combinedcountbymonth, n= sum(monthlycountedstation[1:10,2]))%>%
+ggplot(data = topbottombymonth, aes(x= month, y= dif))+geom_col(fill = "darkgreen")+facet_wrap("start.station.id")+scale_x_discrete(limit = c(1,2,3,4,5,6,7,8,9,10,11,12)) 
+
+#aggregate max dif by month
+as.data.frame(aggregate(combinedcountbymonth$dif, by = list(Month = combinedcountbymonth$month), FUN = max))-> monthsurplus
+
+#make a for loop to go through and get the stations tied to the max surplus
+for(x in 1:nrow(monthsurplus)){
+monthsurplus$stations[x] <- as.character(combinedcountbymonth[combinedcountbymonth$dif == monthsurplus$x[x] & combinedcountbymonth$month == monthsurplus$Month[x], 1])
+}
+#reconvert to factor
+monthsurplus$stations <- as.factor(monthsurplus$stations)
+
+#merge with lat/lon data and rename vector to "Surplus" 
+unique(merge(monthsurplus, citibikesample[,c(4,6:7)], by.x = "stations", by.y = "start.station.id"))%>%rename( Surplus = x) -> monthsurplus
+
+
+#aggregate min dif by month
+as.data.frame(aggregate(combinedcountbymonth$dif, by = list(Month = combinedcountbymonth$month), FUN = min))-> deficitmonth
+
+#make a for loop to go through and get the stations tied to the largest deficits
+for(x in 1:nrow(deficitmonth)){
+deficitmonth$stations[x] <- as.character(combinedcountbymonth[combinedcountbymonth$dif == deficitmonth$x[x] & combinedcountbymonth$month == deficitmonth$Month[x], 1])
+}
+
+#reconvert to factor
+deficitmonth$stations <- as.factor(deficitmonth$stations)
+
+#merge with lat/lon data and rename vector to "Deficit" 
+unique(merge(deficitmonth, citibikesample[,c(4,6:7)], by.x = "stations", by.y = "start.station.id"))%>%rename( Deficit = x) -> deficitmonth
+
+```
+
+
+
+
+Our sample data demonstrate that months `r medianmonth[medianmonth$Dif != 0,1]` have a nonzero median deficits. While average data may show differently, it is best to view median data to avoid outliers that may misrepresent the data.  `r medianmonth[medianmonth$Dif == min(medianmonth$Dif),1]` appears to have the greatest median deficit indicating that extra emphasis should go toward addressing asymmetric traffic during this month. However, individual stations have their own trends. Looking at the top 5 surplus and deficit stations by month, we see that most stations tend to maintain a deficit or surplus standing for each month, with a only few having both large surpluses and large dficits. 
+
+
+These graphs are representative of the stations with the largest 5 surpluses and largest 5 deficits by month. In contrast to the daily data, most of these stations consistently have a cumulative monthly surplus or deficit as evidenced by the directionaly of the bars and the minimal amount of overlap between top 5 surpluses and top 5 deficits. These high consistent surplus stations may be able to take a smaller bike reserve by month on average while the consistent deficit stations may be able to take a higher bike reserve by month on average.
+
+
+
+### Top Surplus Stations By Month
+```{r}
+#coordinates for some are the same, introducing some random noise to separate out a bit while keeping non duplicated lat/lon untouched
+  monthsurplus$start.station.latitude1 <- ifelse(duplicated(monthsurplus$start.station.latitude) == TRUE & duplicated(monthsurplus$start.station.longitude)==TRUE, jitter(monthsurplus$start.station.latitude, factor = 0.01, amount = 0.001), monthsurplus$start.station.latitude)
+
+library(viridis)
+#make color palette for months
+pal <- colorFactor(palette = rainbow(12), domain = monthsurplus$Month)
+#map max surplus by month
+  leaflet(monthsurplus)%>%
+  addTiles() %>%
+  addCircleMarkers(lng = ~start.station.longitude, lat = ~start.station.latitude1, color = ~pal(Month),  radius = 5, opacity = 20, popup = paste("Station ID:", monthsurplus$stations, "<br>","Surplus:", monthsurplus$Surplus, "<br>", "Month:", monthsurplus[,2]))%>%
+    addLegend(position = "bottomright", pal = pal, values = monthsurplus$Month)%>%
+  setView(-73.96,40.75, zoom = 9) 
+  
+ monthsurplus[order(monthsurplus$Month, decreasing = FALSE),]
+```
+
+
+
+### Top Deficit Stations By Month
+```{r}
+#coordinates for four are the same, introducing some random noise to separate out a bit will
+  deficitmonth$start.station.latitude1 <- ifelse(duplicated(deficitmonth$start.station.latitude) == TRUE & duplicated(deficitmonth$start.station.longitude)==TRUE, jitter(deficitmonth$start.station.latitude, factor = 0.01, amount = 0.001), deficitmonth$start.station.latitude)
+
+#make color palette for months
+pal <- colorFactor(palette = rainbow(12), domain = deficitmonth$Month)
+#map max deficit by month
+  leaflet(deficitmonth)%>%
+  addTiles() %>%
+  addCircleMarkers(lng = ~start.station.longitude, lat = ~start.station.latitude1, color = ~pal(Month),  radius = 5, opacity = 20, popup = paste("Station ID:", deficitmonth$stations, "<br>","Deficit:", deficitmonth$Deficit, "<br>", "Month:", deficitmonth[,2]))%>%
+    addLegend(position = "bottomright", pal = pal, values = deficitmonth$Month)%>%
+  setView(-73.96,40.75, zoom = 9) 
+  
+  deficitmonth[order(deficitmonth$Month, decreasing = FALSE),]
+```
+
+
+This map shows which stations are the best candidates to provide a higher bike reserves to on average by month. Please see the map for a table version of this map in case the overlap makes it difficult to discern the months.
+
+
+
+## Weekday
+```{r}
+#make new df that counts start and end station by weekday
+startstationbyweekday <- count(datafortime, start.station.id, weekday)
+endstationbyweekday <- count(datafortime, end.station.id, weekday)
+
+#combine df's by station id and weekday
+combinedcountbyweekday <- merge(startstationbyweekday, endstationbyweekday, by.x = c("start.station.id","weekday"), by.y = c("end.station.id","weekday"))
+
+#find surplus(deficit) and make a new vector
+combinedcountbyweekday$dif <- c(combinedcountbyweekday$n.y - combinedcountbyweekday$n.x)
+
+#make weekday an ordered factor so display it Monday to Sunday
+combinedcountbyweekday$weekday <- ordered(combinedcountbyweekday$weekday, levels = c("Monday", "Tuesday", "Wednesday", "Thursday","Friday", "Saturday", "Sunday"))
+
+#make class vector
+combinedcountbyweekday$class <- ifelse(combinedcountbyweekday$weekday == "Saturday" |combinedcountbyweekday$weekday == "Sunday", "Weekend", "Weekday")
+
+#make a plot of mean surplus(deficit) by weekday for all stations
+group_by(combinedcountbyweekday, class, weekday)%>%
+summarise(
+  Dif = mean(dif, na.rm = TRUE)) -> weekdayaverage
+
+#make it a df
+weekdayaverage <- as.data.frame(weekdayaverage)
+
+#group by class and weekday then summarize median surplus(deficit)
+group_by(combinedcountbyweekday, class, weekday)%>%
+summarise(
+  Dif = median(dif, na.rm = TRUE)) -> weekdaymedian
+
+#make it a df
+weekdaymedian <- as.data.frame(weekdaymedian)
+
+#plot median data
+ggplot(data = weekdaymedian, aes(x = weekday, y= Dif))+geom_col(aes(fill = class))+xlab("Weekday") + ylab("Surplus (Deficit)")+ggtitle("Median Surplus(Deficit) by Weekday") 
+
+
+#make a vector of stations in decreasing surplus(deficit) order
+combinedcountbyweekday[order(combinedcountbyweekday$dif, decreasing = TRUE),1]-> combinedcountbyweekday1 
+
+#stations with the 5 highest surplus
+topcombinedcountbyweekday <- combinedcountbyweekday[combinedcountbyweekday$start.station.id == combinedcountbyweekday1[1]| combinedcountbyweekday$start.station.id == combinedcountbyweekday1[2]|combinedcountbyweekday$start.station.id == combinedcountbyweekday1[3]|combinedcountbyweekday$start.station.id == combinedcountbyweekday1[4]|combinedcountbyweekday$start.station.id == combinedcountbyweekday1[5],]
+
+#stations with the 5 highest deficits
+bottomcombinedcountbyweekday <- combinedcountbyweekday[combinedcountbyweekday$start.station.id == combinedcountbyweekday1[length(combinedcountbyweekday1)]| combinedcountbyweekday$start.station.id == combinedcountbyweekday1[length(combinedcountbyweekday1)-1]|combinedcountbyweekday$start.station.id == combinedcountbyweekday1[length(combinedcountbyweekday1)-2]|combinedcountbyweekday$start.station.id == combinedcountbyweekday1[length(combinedcountbyweekday1)-3]|combinedcountbyweekday$start.station.id == combinedcountbyweekday1[length(combinedcountbyweekday1)-4],]
+
+#bind the rows of top and bottom 5 stations
+topbottombyweekday <- rbind(topcombinedcountbyweekday,bottomcombinedcountbyweekday)
+
+
+
+#show top 5 surplus and deficit stations by weekday and split by station
+ggplot(data= topbottombyweekday, aes(x= weekday, y= dif))+geom_col(fill = "darkgreen")+facet_wrap("start.station.id")+theme(axis.text.x = element_text(angle=90, hjust=1))
+
+
+#aggregate min by weekday
+as.data.frame(aggregate(combinedcountbyweekday$dif, by = list(Weekday = combinedcountbyweekday$weekday), FUN = max))-> surpluscombinedcountbyweekdaycoord
+
+#for loop to map stations to data
+for(x in 1:nrow(surpluscombinedcountbyweekdaycoord)){
+surpluscombinedcountbyweekdaycoord$stations[x] <- as.character(combinedcountbyweekday[combinedcountbyweekday$dif == surpluscombinedcountbyweekdaycoord$x[x] & combinedcountbyweekday$weekday == surpluscombinedcountbyweekdaycoord$Weekday[x], 1])
+}
+
+#make factor again
+surpluscombinedcountbyweekdaycoord$stations <- as.factor(surpluscombinedcountbyweekdaycoord$stations)
+
+#merge unique rows with lat/lon data and rename vector
+unique(merge(surpluscombinedcountbyweekdaycoord, citibikesample[,c(4,6:7)], by.x = "stations", by.y = "start.station.id"))%>% rename( Surplus = x) -> surpluscombinedcountbyweekdaycoord
+
+#aggregate min by weekday
+as.data.frame(aggregate(combinedcountbyweekday$dif, by = list(Weekday = combinedcountbyweekday$weekday), FUN = min))-> deficitcombinedcountbyweekdaycoord
+
+#for loop to map stations to data
+for(x in 1:nrow(deficitcombinedcountbyweekdaycoord)){
+deficitcombinedcountbyweekdaycoord$stations[x] <- as.character(combinedcountbyweekday[combinedcountbyweekday$dif == deficitcombinedcountbyweekdaycoord$x[x] & combinedcountbyweekday$weekday == deficitcombinedcountbyweekdaycoord$Weekday[x], 1])
+}
+
+#make factor again
+deficitcombinedcountbyweekdaycoord$stations <- as.factor(deficitcombinedcountbyweekdaycoord$stations)
+
+#merge unique rows with lat/lon data and rename vector
+unique(merge(deficitcombinedcountbyweekdaycoord, citibikesample[,c(4,6:7)], by.x = "stations", by.y = "start.station.id"))%>% rename( Deficit = x) -> deficitcombinedcountbyweekdaycoord
+
+
+```
+
+
+
+
+
+
+
+
+While average surplus(deficit) data demonstrates that there is a stronger average deficit on `r weekdayaverage[weekdayaverage$Dif == min(weekdayaverage$Dif, na.rm = TRUE),2]`, the median surplus(deficit) graph demonstrates that traffic is skewed on `r paste(weekdaymedian[weekdaymedian$Dif != 0, 2], sep = " and ")` toward a deficit. The likely reason for the difference between average and median data is either an extreme value on that day. However, again, individaul stations appear to have their own patterns. The station with the highest average deficit is station `r combinedcountbyweekday[combinedcountbyweekday$dif == min(combinedcountbyweekday$dif, na.rm = TRUE),1]` with a deficit of `r combinedcountbyweekday[combinedcountbyweekday$dif == min(combinedcountbyweekday$dif, na.rm = TRUE),5]` on `r combinedcountbyweekday[combinedcountbyweekday$dif == min(combinedcountbyweekday$dif, na.rm = TRUE),2]`. Again, there is a very clear trend that stations which have high surpluses for the weekday will continue to to have surpluses throughout the week while high deficit stations have deficits throughout the week. In this case, the overlap exists because the stations that have the highest surpluses have them across multiple days and same of deficits. This means again that these stations are good canditates to focus on by weekday with surplus stations good options for lower average bike reserves and deficit stations good options for higher average bike reserves. This also demonstrates which weekdays are particularly conducive to producing surpluses or deficits by station. The median information, indicates that most stations tend toward a deficit on those days that illustrate a median deficit. Therefore, it is worth exploring this further.
+
+
+#### Wednesday Stats
+```{r}
+#get summary statistics for wednesday suplus(deficit)
+summary(combinedcountbyweekday[combinedcountbyweekday$weekday == "Wednesday", 5])
+
+#plot distribution of surplus and deficits by Wednesday
+ggplot(data = combinedcountbyweekday[combinedcountbyweekday$weekday == "Wednesday", ], aes(x = dif)) + geom_histogram(fill = "darkgreen")+geom_vline(aes(xintercept = 0, linetype = "Zero"), color = "red") + scale_x_continuous(breaks = c(seq( from = -110, to =228, by = 15 )), labels = c(seq( from = -110, to =228, by = 15 )))
+```
+
+
+Looking further into Wednesday data, we see that there is a denser cluster of stations with deficits between about -30 and 0 than the surplus side. This means that there are more stations with smaller deficits than more deficit distributed over a wide range. 
+
+
+### Top Surplus Stations By Weekday
+```{r}
+#coordinates for four are the same, introducing some random noise to separate out a bit will
+  surpluscombinedcountbyweekdaycoord$start.station.latitude1 <- ifelse(duplicated(surpluscombinedcountbyweekdaycoord$start.station.latitude) == TRUE & duplicated(surpluscombinedcountbyweekdaycoord$start.station.longitude)==TRUE, jitter(surpluscombinedcountbyweekdaycoord$start.station.latitude, factor = 0.01, amount = 0.001), surpluscombinedcountbyweekdaycoord$start.station.latitude)
+
+#make color palette
+pal <- colorFactor(palette = rainbow(7), domain = surpluscombinedcountbyweekdaycoord$Weekday)
+#map max surpluses by weekday
+  leaflet(surpluscombinedcountbyweekdaycoord)%>%
+  addTiles() %>%
+  addCircleMarkers(lng = ~start.station.longitude, lat = ~start.station.latitude1, color = ~pal(Weekday),  radius = 5, opacity = 20, popup = paste("Station ID:", surpluscombinedcountbyweekdaycoord$stations, "<br>","Surplus:", surpluscombinedcountbyweekdaycoord$Surplus, "<br>", "Day:", surpluscombinedcountbyweekdaycoord[,2]))%>%
+    addLegend(position = "bottomright", pal = pal, values = surpluscombinedcountbyweekdaycoord$Weekday)%>%
+  setView(-73.96,40.75, zoom = 9) 
+  
+
+surpluscombinedcountbyweekdaycoord
+```
+
+
+This map shows which stations are the best candidates for a lower bike reserve by weekday. Please see the map for a table version of this map in case the overlap makes it difficult to discern the weekdays.
+
+
+
+
+### Top Deficit Stations By Weekday
+```{r}
+#coordinates for four are the same, introducing some random noise to separate out a bit 
+  deficitcombinedcountbyweekdaycoord$start.station.latitude1 <- ifelse(duplicated(deficitcombinedcountbyweekdaycoord$start.station.latitude) == TRUE & duplicated(deficitcombinedcountbyweekdaycoord$start.station.longitude)==TRUE, jitter(deficitcombinedcountbyweekdaycoord$start.station.latitude, factor = 0.01, amount = 0.001), deficitcombinedcountbyweekdaycoord$start.station.latitude)
+
+#make color palette
+pal <- colorFactor(palette = rainbow(7), domain = deficitcombinedcountbyweekdaycoord$Weekday)
+#map deficit maxes by weekday
+  leaflet(deficitcombinedcountbyweekdaycoord)%>%
+  addTiles() %>%
+  addCircleMarkers(lng = ~start.station.longitude, lat = ~start.station.latitude1, color = ~pal(Weekday),  radius = 5, opacity = 20, popup = paste("Station ID:", deficitcombinedcountbyweekdaycoord$stations, "<br>","Deficit:", deficitcombinedcountbyweekdaycoord$Deficit, "<br>", "Day:", deficitcombinedcountbyweekdaycoord[,2]))%>%
+    addLegend(position = "bottomright", pal = pal, values = deficitcombinedcountbyweekdaycoord$Weekday)%>%
+  setView(-73.96,40.75, zoom = 9) 
+ 
+
+  deficitcombinedcountbyweekdaycoord
+```
+
+
+
+
+
+
+
+This map shows which stations are the best candidates to provide a higher bike reserve by weekday. Please see the map for a table version of this map in case the overlap makes it difficult to discern the weekdays. 
+
+
+## Hour
+```{r}
+#make new df that counts start and end station by hour
+startstationbyhour <- count(datafortime, start.station.id, hour)
+endstationbyhour <- count(datafortime, end.station.id, hour)
+
+#combine df's by station id and hour
+combinedcountbyhour <- merge(startstationbyhour, endstationbyhour, by.x = c("start.station.id","hour"), by.y = c("end.station.id","hour"))
+
+#find surplus(deficit) and make a new vector
+combinedcountbyhour$dif <- c(combinedcountbyhour$n.y - combinedcountbyhour$n.x)
+
+#make a plot that shows median surplus(deficit) by hour for all stations
+group_by(combinedcountbyhour, hour, decreasing = TRUE)%>%
+summarise(
+  Dif = median(dif, na.rm = TRUE)) ->medianhour
+
+#make df
+medianhour <- as.data.frame(medianhour)
+ggplot(data = medianhour, aes(x = hour, y= Dif))+geom_col(fill = "darkgreen")+xlab("Hour") + ylab("Surplus (Deficit)") +ggtitle("Median Surplus(Deficit) by Hour") 
+
+
+#get count of each station for use as "index" to get a specified number of stations
+#hourcountedstation <- count(combinedcountbyhour, combinedcountbyhour$start.station.id)
+
+combinedcountbyhour[order(combinedcountbyhour$dif, decreasing = TRUE),1]-> combinedcountbyhour1 
+#stations with the 5 highest surplus
+topcombinedcountbyhour <- combinedcountbyhour[combinedcountbyhour$start.station.id == combinedcountbyhour1[1]| combinedcountbyhour$start.station.id == combinedcountbyhour1[2]|combinedcountbyhour$start.station.id == combinedcountbyhour1[3]|combinedcountbyhour$start.station.id == combinedcountbyhour1[4]|combinedcountbyhour$start.station.id == combinedcountbyhour1[5],]
+
+#stations with the 5 highest deficits
+bottomcombinedcountbyhour <- combinedcountbyhour[combinedcountbyhour$start.station.id == combinedcountbyhour1[length(combinedcountbyhour1)]| combinedcountbyhour$start.station.id == combinedcountbyhour1[length(combinedcountbyhour1)-1]|combinedcountbyhour$start.station.id == combinedcountbyhour1[length(combinedcountbyhour1)-2]|combinedcountbyhour$start.station.id == combinedcountbyhour1[length(combinedcountbyhour1)-3]|combinedcountbyhour$start.station.id == combinedcountbyhour1[length(combinedcountbyhour1)-4],]
+#bind the rows of top and bottom 5 stations
+topbottombyhour <- rbind(topcombinedcountbyhour,bottomcombinedcountbyhour)
+
+
+
+#make a plot that shows surplus(deficit) by hour for 5 stations
+#head(combinedcountbyhour, n= sum(hourcountedstation[1:5,2]))%>%
+ggplot(data= topbottombyhour, aes(x= hour, y= dif))+geom_col(fill = "darkgreen")+facet_wrap("start.station.id")
+
+#aggregate max dif by month
+as.data.frame(aggregate(combinedcountbyhour$dif, by = list(Hour = combinedcountbyhour$hour), FUN = max))-> hoursurplus
+
+#make a for loop to go through and get the stations tied to the max surplus
+for(x in 1:nrow(hoursurplus)){
+hoursurplus$stations[x] <- as.character(combinedcountbyhour[combinedcountbyhour$dif == hoursurplus$x[x] & combinedcountbyhour$hour == hoursurplus$Hour[x], 1])
+}
+#reconvert to factor
+hoursurplus$stations <- as.factor(hoursurplus$stations)
+
+#merge with lat/lon data and rename vector to "Surplus" 
+unique(merge(hoursurplus, citibikesample[,c(4,6:7)], by.x = "stations", by.y = "start.station.id"))%>%rename( Surplus = x) -> hoursurplus
+
+
+#aggregate min dif by hour
+as.data.frame(aggregate(combinedcountbyhour$dif, by = list(Hour = combinedcountbyhour$hour), FUN = min))-> deficithour
+
+#make a for loop to go through and get the stations tied to the largest deficits
+for(x in 1:nrow(deficithour)){
+deficithour$stations[x] <- as.character(combinedcountbyhour[combinedcountbyhour$dif == deficithour$x[x] & combinedcountbyhour$hour == deficithour$Hour[x], 1])
+}
+
+#reconvert to factor
+deficithour$stations <- as.factor(deficithour$stations)
+
+#merge with lat/lon data and rename vector to "Deficit" 
+unique(merge(deficithour, citibikesample[,c(4,6:7)], by.x = "stations", by.y = "start.station.id"))%>%rename( Deficit = x) -> deficithour
+
+#order by decreasing
+hoursurplus <- hoursurplus[order(hoursurplus$Surplus, decreasing = TRUE),]
+deficithour <- deficithour[order(deficithour$Deficit, decreasing = FALSE),]
+```
+
+
+
+
+
+
+Cumulative hourly data shows a work rushhour pattern. Interestingly, the morning tends to have larger deficits, indicating either that individuals are leaving at about the same time to get to work or they are leaving from the same few areas but are going to work across many areas. Conversely, the evening surplus either indicates that everyone is arriving home at around the same time or the same trend as described before but in reverse - people are going from scattered work areas and dropping bikes off at a more concentrated few places. The largest deficit is `r min(medianhour$Dif)` and it occurs at hour `r medianhour[medianhour$Dif == min(medianhour$Dif),1]`. The largest surplus is `r max(medianhour$Dif)` and it occurs at hour `r medianhour[medianhour$Dif == max(medianhour$Dif),1]`. This is important because this is a self-correcting traffic asymmetry of sorts. It would not be prudent to significantly change the bike reserves at frequent work stations because the surplus reserve from the night before is important for the morning rush. 
+
+
+Once we get into hourly data by station, we see that the stations with the largest surpluses also have some of the largest deficits. We can see that for almost all of these stations, there is a large opposing flux in the evening. This is a great proxy for estimating flow of traffic. For example, the stations where we see a large deficit in the morning are likely by a large number of individuals' residence or a transit station and they are taking bikes from these to go to work while the large opposing surplus at the end of the day shows that they are returning to their home station. On the flip side, stations with a large morning surplus are likely by a large number of those individuals' work location and it is where they are dropping the bikes off. When integrating this with the average hourly data, we see that that morning commute is the most uneven. Perhaps we can extrapolate that this is because they are on average roughly evening out the asymmetric traffic incurred in the morning by returning it to the same station. The reason it likely isn't perfectly zero is because some may return to an adjacent station and there are non-business commuters taking bikes out for a ride. 
+
+
+
+
+### Hour Max Surplus Plot
+```{r}
+#plot max surplus for each hour
+ggplot(data = hoursurplus, aes(x= Hour, y = Surplus))+geom_col(fill = "darkgreen",  position = position_dodge(5)) + ggtitle("Surplus by Hour of Day")+geom_text(aes(label =  round(Surplus), vjust = -1))+ylim(0, 850)
+```
+
+
+Unsurpisingly, the maximum surplus occurs in the evening at station `r hoursurplus[1,1]`, hour `r hoursurplus[1,2]` while the second largest surplus occurs at station `r hoursurplus[2,1]`, hour `r hoursurplus[2,2]`. This demonstrates the pattern seen cumulatively with the median graph. These hours are likely when people are arriving at work (in the morning) and arriving at their transit station or residence (evening). The surpluses in the meantime either reflect different work schedules or leisure travel. 
+
+
+### Hourly Top Surplus Stations Map
+```{r}
+#coordinates for four are the same, introducing some random noise to separate out a bit 
+  hoursurplus$start.station.latitude1 <- ifelse(duplicated(hoursurplus$start.station.latitude) == TRUE & duplicated(hoursurplus$start.station.longitude)==TRUE, jitter(hoursurplus$start.station.latitude, factor = 0.01, amount = 0.001), hoursurplus$start.station.latitude)
+
+#make color palette
+pal <- colorFactor(palette = rainbow(24), domain = hoursurplus$Hour)
+#map max surplus by hour
+  leaflet(hoursurplus)%>%
+  addTiles() %>%
+  addCircleMarkers(lng = ~start.station.longitude, lat = ~start.station.latitude1, color = ~pal(Hour),  radius = 5, opacity = 20, popup = paste("Station ID:", hoursurplus$stations, "<br>","Surplus:", hoursurplus$Surplus, "<br>", "Hour:", hoursurplus[,2]))%>%
+    addLegend(position = "bottomright", pal = pal, values = hoursurplus$Hour)%>%
+  setView(-73.96,40.75, zoom = 9) 
+  
+  hoursurplus[order(hoursurplus$Hour, decreasing = FALSE),]
+```
+
+
+As a macro observation, similarly colored markers are all clustered by each other. This means that users are arriving at the same location close to each other. As expected, in the evening, some of the highest surpluses or clusters of surpluses occur around transit stations - Penn Station and Port Authority Bus Terminal. In the morning, many people are arriving at the Flatiron district on Broadway. Either this is a popular leisure spot or they are working around here.
+
+
+### Hour Max Deficit Plot
+```{r}
+#plot max deficit for each hour
+ggplot(data = deficithour, aes(x= Hour, y = Deficit))+geom_col(fill = "darkgreen",  position = position_dodge(5)) + ggtitle("Deficit by Hour of Day")+geom_text(aes(label =  -round(Deficit), vjust = +1.5))+ylim(-950,0)
+```
+
+As suspected, the hour with the largest deficit occurs at station `r deficithour[1,1]`, hour  `r deficithour[1,2]` while the second largest deficit occurs at station `r deficithour[2,1]`, hour `r deficithour[2,2]`. This demonstrates the pattern seen cumulatively with the median graph. These hours are likely when people are leaving for work and leaving work itself. The deficits in the meantime either reflect different work schedules or leisure travel. 
+
+
+### Hour Deficit Stations Map
+```{r}
+#coordinates for four are the same, introducing some random noise to separate out a bit will
+  deficithour$start.station.latitude1 <- ifelse(duplicated(deficithour$start.station.latitude) == TRUE & duplicated(deficithour$start.station.longitude)==TRUE, jitter(deficithour$start.station.latitude, factor = 0.01, amount = 0.001), deficithour$start.station.latitude)
+
+#make color palette
+pal <- colorFactor(palette = rainbow(24), domain = deficithour$Hour)
+#map max deficit by hour
+  leaflet(deficithour)%>%
+  addTiles() %>%
+  addCircleMarkers(lng = ~start.station.longitude, lat = ~start.station.latitude1, color = ~pal(Hour),  radius = 5, opacity = 20, popup = paste("Station ID:", deficithour$stations, "<br>","Deficit:", deficithour$Deficit, "<br>", "Hour:", deficithour[,2]))%>%
+    addLegend(position = "bottomright", pal = pal, values = deficithour$Hour)%>%
+  setView(-73.96,40.75, zoom = 9) 
+  
+  deficithour[order(deficithour$Hour, decreasing = FALSE),]
+```
+
+
+
+Across the board, like colors tend to be close to each other. Because we chose the rainbow pallete to illustrate by hour, this means that deficits exist around the same areas for groups of hours. Additionally, these locations largely mirror what was seen in the surplus hour map but at opposing times (morning vs evening and vice versa). The map shows that some of the highest deficit stations occur by transit sites, with one of the clusters of high deficit stations in the morning by Penn Station and another occuring by West Midtown Ferry terminal. The next highest deficit groups occur around Broadway in the Flatiron district. When considering this also appeared as a maximum surplus in the morning and there is a `r head(deficithour[deficithour$stations == "402", 2], 1) - head(hoursurplus[hoursurplus$stations == "402", 2], 1)` hour difference, this is likely a place where people work. The same is true with large surpluses spaced in the morning/evening followed by large deficits in the evening/morning. However, it is worth taking a dive into hour by weekday to see if this differs. 
+
+
+### Morning Deficit Heatmap
+```{r}
+library(leaflet.extras)
+
+#map the top deficit stations by hour for morning hours to mirror median trends (why we chose to only look at morning deficit to evening surplus)
+leaflet(deficithour[deficithour$Hour <=9,])%>%
+  addTiles() %>%
+  addHeatmap(lng = ~start.station.longitude, lat = ~start.station.latitude, radius =10, intensity =   ~Deficit, minOpacity = min(abs(deficithour[deficithour$Hour <=9,3])), max = max(abs(deficithour[deficithour$Hour <=9,3])))%>%
+      setView(-73.96,40.75, zoom = 12) 
+```
+
+
+There is a morning deficit hotspot around Penn Station indicating that this is a departure point for many in the morning.
+
+
+
+### Evening Surplus Heatmap
+```{r}
+#map the top surplus stations by hour for evening hours to mirror median trends (why we chose to only look at morning deficit to evening surplus)
+leaflet(hoursurplus[hoursurplus$Hour >=16,])%>%
+  addTiles() %>%
+  addHeatmap(lng = ~start.station.longitude, lat = ~start.station.latitude, radius =10, intensity = ~Surplus, minOpacity = min(abs(hoursurplus[hoursurplus$Hour >=16,3])), max = max(abs(hoursurplus[hoursurplus$Hour >=16,3])))%>%
+      setView(-73.96,40.75, zoom = 12) 
+```
+
+ This shows that in the evening, people are arriving at Penn Station and Tompkins Park.
+
+## Hour by Weekday
+```{r warning=FALSE}
+#make new df that counts start and end station by hour
+startstationbyweekhour <- count(datafortime, start.station.id, weekday, hour)
+endstationbyweekhour <- count(datafortime, end.station.id, weekday, hour)
+
+#combine df's by station id and hour
+combinedcountbyweekhour <- merge(startstationbyweekhour, endstationbyweekhour, by.x = c("start.station.id", "weekday", "hour"), by.y = c("end.station.id", "weekday", "hour"))
+
+
+#find surplus(deficit) and make a new vector
+combinedcountbyweekhour$dif <- c(combinedcountbyweekhour$n.y - combinedcountbyweekhour$n.x)
+
+#classify by weekend/weekday
+combinedcountbyweekhour$class <- ifelse(combinedcountbyweekhour$weekday == "Saturday" |combinedcountbyweekhour$weekday == "Sunday", "Weekend", "Weekday")  
+
+
+#make a plot that shows median surplus(deficit) by hour for all stations
+group_by(combinedcountbyweekhour, weekday, hour)%>%
+summarise(
+  Dif = median(dif, na.rm = TRUE)) ->medianweekhour
+
+#make df
+medianweekhour <- as.data.frame(medianweekhour)
+
+#plot median weekhour data and split by weekday
+ggplot(data = medianweekhour, aes(x = hour, y= Dif))+geom_col(fill = "darkgreen")+ facet_wrap(vars(weekday))+ xlab("Hour") + ylab("Surplus (Deficit)") +ggtitle("Median Surplus(Deficit) by Hour") 
+
+
+#group by weekday and hour to summarize max deficit and the station
+group_by(combinedcountbyweekhour, weekday, hour)%>%
+  summarise(
+    Surplus = max(dif, na.rm = TRUE),
+    Station = paste(c(as.character(combinedcountbyweekhour[combinedcountbyweekhour$weekday == weekday & combinedcountbyweekhour$hour == hour & combinedcountbyweekhour$dif == max(combinedcountbyweekhour[combinedcountbyweekhour$weekday == weekday & combinedcountbyweekhour$hour == hour,6], na.rm = TRUE), 1])))) -> topsurplusweekhour
+   
+#group by weekday and hour to summarize max deficit and the station    
+ group_by(combinedcountbyweekhour, weekday, hour)%>%
+  summarise(
+    Deficit = min(dif, na.rm = TRUE),
+    Station = paste(c(as.character(combinedcountbyweekhour[combinedcountbyweekhour$weekday == weekday & combinedcountbyweekhour$hour == hour & combinedcountbyweekhour$dif == min(combinedcountbyweekhour[combinedcountbyweekhour$weekday == weekday & combinedcountbyweekhour$hour == hour,6], na.rm = TRUE), 1])))
+  ) -> topdeficitweekhour
+
+
+
+#bind top surplus and deficit stations
+unique(rbind(topsurplusweekhour[,4], topdeficitweekhour[,4])) -> topbottomweekhour
+
+#merge with data so match station to data
+merge(topbottomweekhour, combinedcountbyweekhour[,c(1:3,6)], by.x = "Station", by.y = "start.station.id") ->  topbottombyweekhour     
+topbottombyweekhour$class <- ifelse(topbottombyweekhour$weekday == "Saturday" |topbottombyweekhour$weekday == "Sunday", "Weekend", "Weekday")      
+
+
+#show max surpluses and deficits by hour by weekday to show rush hours
+ggplot(data= topbottombyweekhour, aes(x= hour, y= dif))+geom_col(aes(fill = class))+facet_wrap(vars(weekday)) + ggtitle("Visualization of Rush Hours")
+
+
+#summary max surpluses and deficits for class
+group_by(topbottombyweekhour, class)%>%
+  summarise(
+    Max_Surplus = max(dif, na.rm = TRUE),
+    Max_Deficit = min(dif, na.rm = TRUE)
+  )
+```
+
+
+From this graph, we can see that the weekends do not show the rush hour traffic, as predicted. Therefore, we will next identify which areas with the large surpluses and deficits that occur on weekends. Also, across the board, very few asymmetries exist between hours 0 and 5.  The summary data table also illustrates that weekdays have much larger surpluses and deficits by hour as would be expected without the rush hour traffic patterns.
+
+### Surplus Heatmaps by Weekday and Weekend
+### Surplus Heatmaps by Weekday 
+```{r}
+#get lat lon for stations
+unique(merge(topsurplusweekhour, citibikesample[,c(4,6:7)], by.x = "Station", by.y = "start.station.id")) -> topsurplusweekhourcoord
+
+
+#coordinates for four are the same, introducing some random noise to separate out a bit will
+ # topsurplusweekhourcoord$start.station.latitude <- ifelse(duplicated(topsurplusweekhourcoord$start.station.latitude) == TRUE & duplicated(topsurplusweekhourcoord$start.station.longitude)==TRUE, jitter(topsurplusweekhourcoord$start.station.latitude, factor = 0.01, amount = 0.001), topsurplusweekhourcoord$start.station.latitude)
+#create weekday/weekend classes  
+topsurplusweekhourcoord$class <- ifelse(topsurplusweekhourcoord$weekday == "Saturday" |topsurplusweekhourcoord$weekday == "Sunday", "Weekend", "Weekday") 
+
+#weekday map of surplus
+  leaflet(topsurplusweekhourcoord[topsurplusweekhourcoord$class == "Weekday",])%>%
+  addTiles() %>%
+  addHeatmap(lng = ~start.station.longitude, lat = ~start.station.latitude, radius =10, intensity =   ~Surplus, minOpacity = min(topsurplusweekhourcoord[topsurplusweekhourcoord$class == "Weekday",4]), max = max(topsurplusweekhourcoord[topsurplusweekhourcoord$class == "Weekday",4]))%>%
+      setView(-73.96,40.75, zoom = 12) 
+```
+  
+  
+  
+  
+
+
+### Surplus Heatmaps by Weekend  
+```{r}  
+#weekend map of surplus  
+   leaflet(topsurplusweekhourcoord[topsurplusweekhourcoord$class == "Weekend",])%>%
+  addTiles() %>%
+  addHeatmap(lng = ~start.station.longitude, lat = ~start.station.latitude, radius =10, intensity =   ~Surplus, minOpacity = min(topsurplusweekhourcoord[topsurplusweekhourcoord$class == "Weekend",4]), max = max(topsurplusweekhourcoord[topsurplusweekhourcoord$class == "Weekend",4]))%>%
+      setView(-73.96,40.75, zoom = 12) 
+ 
+```
+
+
+From this, we can see that weekday surpluses are heavily around Tompkins Square Park, Madison Square Park, Penn Station and the 42nd Port Authority Bus Terminal. Weekend surpluses are heavily around Tompkins Square Park as well but are also heavy around the south part of Central Park. This shows where users are spending most of their time visiting.
+
+
+### Surplus Heatmaps by Weekday Morning and Evening
+### Surplus Heatmaps by Weekday Morning 
+```{r}
+
+#map max surpluses by weekday morning
+  leaflet(topsurplusweekhourcoord[topsurplusweekhourcoord$hour <= 9 & topsurplusweekhourcoord$class == "Weekday",])%>%
+  addTiles() %>%
+  addHeatmap(lng = ~start.station.longitude, lat = ~start.station.latitude, radius =10, intensity =   ~Surplus, minOpacity = min(topsurplusweekhourcoord[topsurplusweekhourcoord$hour <= 9 & topsurplusweekhourcoord$class == "Weekday",4]), max = max(topsurplusweekhourcoord[topsurplusweekhourcoord$hour <= 9 & topsurplusweekhourcoord$class == "Weekday",4]))%>%
+      setView(-73.96,40.75, zoom = 12) 
+```  
+
+
+
+
+
+#### Surplus Heatmaps by Weekday Evening
+```{r}  
+#map max surpluses by weekday evening
+   leaflet(topsurplusweekhourcoord[topsurplusweekhourcoord$hour >=16 & topsurplusweekhourcoord$class == "Weekday",])%>%
+  addTiles() %>%
+  addHeatmap(lng = ~start.station.longitude, lat = ~start.station.latitude, radius =10, intensity =   ~Surplus, minOpacity = min(topsurplusweekhourcoord[topsurplusweekhourcoord$hour >=16 & topsurplusweekhourcoord$class == "Weekday",4]), max = max(topsurplusweekhourcoord[topsurplusweekhourcoord$hour >=16 & topsurplusweekhourcoord$class == "Weekday",4]))%>%
+      setView(-73.96,40.75, zoom = 12) 
+ 
+```
+
+
+In the morning, people are arriving in large amounts all over the place. However, in the evening, we can isolate five hotspots - Penn Station, the West Midtown Ferry Terminal, 42nd Port Authority Bus Terminal, Stuyvesant Town, and Tompkins Park. This means that evening surpluses are created when people are going home.
+
+
+### Deficit Heatmaps by Weekday and Weekend
+#### Deficit Heatmaps by Weekday 
+```{r}
+#get lat lon for stations
+unique(merge(topdeficitweekhour, citibikesample[,c(4,6:7)], by.x = "Station", by.y = "start.station.id")) -> topdeficitweekhourcoord
+
+
+#coordinates for four are the same, introducing some random noise to separate out a bit will
+ # topsurplusweekhourcoord$start.station.latitude <- ifelse(duplicated(topsurplusweekhourcoord$start.station.latitude) == TRUE & duplicated(topsurplusweekhourcoord$start.station.longitude)==TRUE, jitter(topsurplusweekhourcoord$start.station.latitude, factor = 0.01, amount = 0.001), topsurplusweekhourcoord$start.station.latitude)
+#create weekday/weekend classes  
+topdeficitweekhourcoord$class <- ifelse(topdeficitweekhourcoord$weekday == "Saturday" |topdeficitweekhourcoord$weekday == "Sunday", "Weekend", "Weekday")  
+#map max deficits by weekday
+  leaflet(topdeficitweekhourcoord[topdeficitweekhourcoord$class == "Weekday",])%>%
+  addTiles() %>%
+  addHeatmap(lng = ~start.station.longitude, lat = ~start.station.latitude, radius =10, intensity =   ~Deficit, minOpacity = min(abs(topdeficitweekhourcoord[topdeficitweekhourcoord$class == "Weekday",4])), max = max(abs(topdeficitweekhourcoord[topdeficitweekhourcoord$class == "Weekday",4])))%>%
+      setView(-73.96,40.75, zoom = 12) 
+  
+```  
+
+
+
+
+
+
+#### Deficit Heatmaps by Weekend 
+```{r}   
+
+#map max deficits by weekend
+   leaflet(topdeficitweekhourcoord[topdeficitweekhourcoord$class == "Weekend",])%>%
+  addTiles() %>%
+  addHeatmap(lng = ~start.station.longitude, lat = ~start.station.latitude, radius =10, intensity =   ~Deficit, minOpacity = min(abs(topdeficitweekhourcoord[topdeficitweekhourcoord$class == "Weekend",4])), max = max(abs(topdeficitweekhourcoord[topdeficitweekhourcoord$class == "Weekend",4])))%>%
+      setView(-73.96,40.75, zoom = 12) 
+ 
+```
+
+
+
+
+
+
+
+From this, it is hard to make precise conclusions but it is clear that the geographic distribution is different on weekdays and weekends.
+
+
+### Deficit Heatmaps by Weekday Morning and Evening
+#### Deficit Heatmaps by Weekday Morning 
+```{r}
+#map max morning weekday deficits
+  leaflet(topdeficitweekhourcoord[topdeficitweekhourcoord$hour <= 9 & topdeficitweekhourcoord$class == "Weekday",])%>%
+  addTiles() %>%
+  addHeatmap(lng = ~start.station.longitude, lat = ~start.station.latitude, radius =10, intensity =   ~Deficit, minOpacity = min(abs(topdeficitweekhourcoord[topdeficitweekhourcoord$hour <= 9 & topdeficitweekhourcoord$class == "Weekday",4])), max = max(abs(topdeficitweekhourcoord[topdeficitweekhourcoord$hour <= 9 & topdeficitweekhourcoord$class == "Weekday",4])))%>%
+      setView(-73.96,40.75, zoom = 12) 
+``` 
+
+
+
+#### Deficit Heatmaps by Weekday Evening 
+```{r}  
+#map max evening weekday deficits
+   leaflet(topdeficitweekhourcoord[topdeficitweekhourcoord$hour >=16 & topdeficitweekhourcoord$class == "Weekday",])%>%
+  addTiles() %>%
+  addHeatmap(lng = ~start.station.longitude, lat = ~start.station.latitude, radius =10, intensity =   ~Deficit, minOpacity = min(abs(topdeficitweekhourcoord[topdeficitweekhourcoord$hour >=16 & topdeficitweekhourcoord$class == "Weekday",4])), max = max(abs(topdeficitweekhourcoord[topdeficitweekhourcoord$hour >=16 & topdeficitweekhourcoord$class == "Weekday",4])))%>%
+      setView(-73.96,40.75, zoom = 12) 
+ 
+```
+
+These deficit weekday morning/evening heatmaps mirror the surplus weekday morning/evening heatmaps, demonstrating that the surplus and deficits identified are largely occuring as a result of work traffic.
+
+
+### Check Previous Hourly Data Against Weekday/Weekend
+```{r warning=FALSE}
+#merge hourly and weekhour data so can see if hourly data was impacted by weekend traffic
+merge(hoursurplus, topsurplusweekhour, by.x = "stations", by.y = "Station") -> comparesurplus
+
+#make class vector
+comparesurplus$class <- ifelse(comparesurplus$weekday == "Saturday" |comparesurplus$weekday == "Sunday", "Weekend", "Weekday")
+
+
+
+#groupby class
+group_by(comparesurplus, stations)%>%
+  summarise(
+    Class = class
+  ) -> check
+
+#get unique rows
+unique(check) -> check
+
+#Summarize to show which are weekday, weekend, or nonexclusive stations
+summarise(check,
+          Type = ifelse(nrow(check[check$stations == stations,]) == 1, as.character(check[check$stations == stations, 2]), "Both")) -> checksurplus
+
+
+#merge hourly and weekhour data so can see if hourly data was impacted by weekend traffic
+merge(deficithour, topdeficitweekhour, by.x = "stations", by.y = "Station") -> comparedeficit
+
+#make class vector
+comparedeficit$class <- ifelse(comparedeficit$weekday == "Saturday" |comparedeficit$weekday == "Sunday", "Weekend", "Weekday")
+
+
+#groupby class
+group_by(comparedeficit, stations)%>%
+ summarise(
+    Class = class
+  ) -> check
+
+#get unique rows
+unique(check) -> check
+
+#Summarize to show which are weekday, weekend, or nonexclusive stations
+summarise(check,
+          Type = ifelse(nrow(check[check$stations == stations,]) == 1, as.character(check[check$stations == stations, 2]), "Both")) -> checkdeficit
+
+ #make color pal for 
+pal <- colorFactor(palette = rainbow(2), domain = topsurplusweekhourcoord$class)
+
+#map max surplus stations by class
+  leaflet(topsurplusweekhourcoord)%>%
+  addTiles() %>%
+  addCircleMarkers( ~start.station.longitude, ~start.station.latitude, color = ~pal(class),  radius = 5, popup = paste("Station ID:", topsurplusweekhourcoord$Station, "<br>","Surplus:", topsurplusweekhourcoord$Surplus, "<br>", "Day:", topsurplusweekhourcoord$weekday,"<br>","Hour:", topsurplusweekhourcoord$hour))%>%
+    addLegend(position = "bottomright", pal = pal, values = topsurplusweekhourcoord$class)%>%
+  setView(-73.96,40.75, zoom = 9) 
+
+  
+ #make color pal for 
+  pal <- colorFactor(palette = rainbow(2), domain = topdeficitweekhourcoord$class)
+
+#map max  deficit stations by class
+  leaflet(topdeficitweekhourcoord)%>%
+  addTiles() %>%
+  addCircleMarkers( ~start.station.longitude, ~start.station.latitude, color = ~pal(class),  radius = 5, popup = paste("Station ID:", topdeficitweekhourcoord$Station, "<br>","Deficit:", topdeficitweekhourcoord$Deficit, "<br>", "Day:", topdeficitweekhourcoord$weekday,"<br>","Hour:", topdeficitweekhourcoord$hour))%>%
+    addLegend(position = "bottomright", pal = pal, values = topdeficitweekhourcoord$class)%>%
+  setView(-73.96,40.75, zoom = 9) 
+  
+#show the checks
+checksurplus
+checkdeficit
+```
+
+
+The map shows that overall, most 
+
+When comparing  can see that station `r checkdeficit[checkdeficit$Type == "Weekend",1]` is only impacted by weekend deficits while `r checksurplus[checksurplus$Type == "Weekend",1]` is only impacted by weekend surpluses. This allows us to separate out deficits and surpluses caused by work related travel and deficits and surpluses created likely by leisure travel. While some people may be working on the weekend, we saw above that the maximum surpluses and deficits are smaller by the hour. Therefore, the weekday work travels are most important to separate out. 
+
+
+
+### Visualize Identified Weekend Stations vs Weekday Stations for Surplus
+```{r}
+#coordinates for four are the same, introducing some random noise to separate out a bit will
+  hoursurplus$start.station.latitude1 <- ifelse(duplicated(hoursurplus$start.station.latitude) == TRUE & duplicated(hoursurplus$start.station.longitude)==TRUE, jitter(hoursurplus$start.station.latitude, factor = 0.01, amount = 0.001), hoursurplus$start.station.latitude)
+
+#get unique values from mapped coordinates
+unique(merge(checksurplus, citibikesample[,c(4,6:7)], by.x = "stations", by.y = "start.station.id")) -> checksurpluscoord
+
+#make weekend only
+checksurpluscoord <- checksurpluscoord[checksurpluscoord$Type == "Weekend",]
+
+#make color palette
+pal <- colorFactor(palette = rainbow(24), domain = hoursurplus$Hour)
+
+#map old hourly data with circle markers and add marker for weekend station
+  leaflet()%>%
+  addTiles() %>%
+  addCircleMarkers(data= hoursurplus, lng = ~start.station.longitude, lat = ~start.station.latitude, color = ~pal(Hour),  radius = 5, opacity = 20, popup = paste("Station ID:", hoursurplus$stations, "<br>","Surplus:", hoursurplus$Surplus, "<br>", "Hour:", hoursurplus[,2]))%>%
+    addMarkers(data = checksurpluscoord, lng = ~start.station.longitude, lat = ~start.station.latitude, popup = paste("Station ID:", checksurpluscoord$stations, "<br>","Type:", checksurpluscoord$Type) )%>%
+    addLegend(position = "bottomright", pal = pal, values = hoursurplus$Hour)%>%
+  setView(-73.96,40.75, zoom = 10) 
+  
+
+```
+
+This allows us to see that `r checksurpluscoord[checksurpluscoord$Type == "Weekend",1]` is heavily impacted by weekend traffic and allows us to separate this out from the workday commute.
+
+
+
+### Visualize Identified Weekend Stations vs Weekday Stations for Deficit
+```{r}
+#coordinates for some are the same, introducing some random noise to separate out a bit
+  deficithour$start.station.latitude1 <- ifelse(duplicated(deficithour$start.station.latitude) == TRUE & duplicated(deficithour$start.station.longitude)==TRUE, jitter(deficithour$start.station.latitude, factor = 0.01, amount = 0.001), deficithour$start.station.latitude)
+
+#merge with coordinates
+  unique(merge(checkdeficit, citibikesample[,c(4,6:7)], by.x = "stations", by.y = "start.station.id")) -> checkdeficitcoord
+  #filter for weekend only
+checkdeficitcoord <- checkdeficitcoord[checkdeficitcoord$Type == "Weekend",]
+
+#make color palette
+pal <- colorFactor(palette = rainbow(24), domain = deficithour$Hour)
+
+#map old hourly data with circle markers and add marker for weekend station
+  leaflet()%>%
+  addTiles() %>%
+  addCircleMarkers(data = deficithour, lng = ~start.station.longitude, lat = ~start.station.latitude1, color = ~pal(Hour),  radius = 5, opacity = 20, popup = paste("Station ID:", deficithour$stations, "<br>","Deficit:", deficithour$Deficit, "<br>", "Hour:", deficithour[,2]))%>%
+    addMarkers(data = checkdeficitcoord, lng = ~start.station.longitude, lat = ~start.station.latitude, popup = paste("Station ID:", checkdeficitcoord$stations, "<br>","Type:", checkdeficitcoord$Type) )%>%
+    addLegend(position = "bottomright", pal = pal, values = deficithour$Hour)%>%
+  setView(-73.96,40.75, zoom = 10) 
+  
+
+  
+
+```
+
+This allows us to see that `r checkdeficitcoord[checkdeficitcoord$Type == "Weekend",1]` is heavily impacted by weekend traffic and allows us to separate this out from the workday commute.
+
+
+
+### Max Surplus Plot by Hour by Weekday/Weekend
+```{r warning=FALSE}
+#make new df that counts start and end station by hour
+datafortime$class <- ifelse(datafortime$weekday == "Saturday" |datafortime$weekday == "Sunday", "Weekend", "Weekday")
+startstationbyclasshour <- count(datafortime, start.station.id, class, hour)
+endstationbyclasshour <- count(datafortime, end.station.id, class, hour)
+
+#combine df's by station id class and hour
+combinedcountbyclasshour <- merge(startstationbyclasshour, endstationbyclasshour, by.x = c("start.station.id", "class", "hour"), by.y = c("end.station.id", "class", "hour"))
+
+#find surplus(deficit) and make a new vector
+combinedcountbyclasshour$dif <- c(combinedcountbyclasshour$n.y - combinedcountbyclasshour$n.x)
+
+#get max dif by class by hour and only return one station
+group_by(combinedcountbyclasshour, class, hour)%>%
+  summarise(
+    Station = paste(head(as.character(combinedcountbyclasshour[combinedcountbyclasshour$class == class & combinedcountbyclasshour$hour == hour & combinedcountbyclasshour$dif == max(combinedcountbyclasshour[combinedcountbyclasshour$class == class & combinedcountbyclasshour$hour == hour,6], na.rm = TRUE), 1]), n=1)),
+    Surplus = max(dif, na.rm = TRUE)
+  ) -> classsurplushour
+
+#merge by hour to see how weekday vs weekend contributes
+merge(hoursurplus, classsurplushour, by.x = "Hour", by.y = "hour") -> comboclasssurplus
+
+
+
+#plot max surplus for each hour by weekday/weekend
+ggplot(data = comboclasssurplus, aes(x= Hour))+geom_col(fill = "darkgreen", aes(y = Surplus.x), alpha = 0.5)+ geom_col(aes(y = Surplus.y, fill = class), alpha = .5) + ggtitle("Surplus by Hour of Day with Weekday/Weekend Compared to Hourly Data")+facet_wrap(vars(class))
+```
+
+This graph shows that the hourly data was very minimally impacted by weekend noise. Anywhere the hourly data (shown in green) goes past the weekday bar, there is likely a surplus from the weekend data pushing it over while anywhere it is under the weekday bar, there is likely offsetting weekend data.
+
+
+
+### Max Deficit Plot by Hour by Weekday/Weekend
+```{r warning=FALSE}
+group_by(combinedcountbyclasshour, class, hour)%>%
+  summarise(
+    Station = paste(head(as.character(combinedcountbyclasshour[combinedcountbyclasshour$class == class & combinedcountbyclasshour$hour == hour & combinedcountbyclasshour$dif == min(combinedcountbyclasshour[combinedcountbyclasshour$class == class & combinedcountbyclasshour$hour == hour,6], na.rm = TRUE), 1]), n=1)),
+    Deficit = min(dif, na.rm = TRUE)
+  ) -> classdeficithour
+
+merge(deficithour, classdeficithour, by.x = "Hour", by.y = "hour") -> comboclassdeficit
+
+ggplot(data = comboclassdeficit, aes(x= Hour))+geom_col(fill = "darkgreen", aes(y = Deficit.x), alpha = 0.5)+ geom_col(aes(y = Deficit.y, fill = class), alpha = 0.5) + ggtitle("Deficit by Hour of Day with Weekday/Weekend compared to Hourly Data")+facet_wrap(vars(class))
+```
+
+
+This graph shows that the hourly data was very minimally impacted by weekend noise. Anywhere the hourly data (shown in green) goes past the weekday bar, there is likely a deficit from the weekend data pushing it over while anywhere it is under the weekday bar, there is likely offsetting weekend data.
+
+## Holidays
+```{r}
+#make new df that counts start and end station by Holiday
+startstationbyholiday <- count(datafortime, start.station.id, holiday)
+endstationbyholiday <- count(datafortime, end.station.id, holiday)
+
+#combine df's by station id and holiday
+combinedcountbyholiday <- merge(startstationbyholiday, endstationbyholiday, by.x = c("start.station.id","holiday"), by.y = c("end.station.id","holiday"))
+
+#find surplus(deficit) and make a new vector
+combinedcountbyholiday$dif <- c(combinedcountbyholiday$n.y - combinedcountbyholiday$n.x)
+
+#make a plot that shows median surplus(deficit) by holiday for all stations
+group_by(combinedcountbyholiday, holiday, decreasing = TRUE)%>%
+summarise(
+  Dif = median(dif, na.rm = TRUE))%>%
+ggplot(aes(x = holiday, y= Dif))+geom_col(fill = "darkgreen")+xlab("Holiday") + ylab("Surplus (Deficit)")+ggtitle("Median Surplus(Deficit) by Holiday")+theme(axis.text.x = element_text(angle=90, hjust=1))  
+
+
+
+combinedcountbyholiday[combinedcountbyholiday$holiday != "Not Holiday",]-> combinedcountbyholiday1 
+combinedcountbyholiday1[order(combinedcountbyholiday1$dif, decreasing = TRUE),] -> combinedcountbyholiday1 
+#stations with the 5 highest surplus
+topcombinedcountbyholiday <- combinedcountbyholiday[combinedcountbyholiday$start.station.id == combinedcountbyholiday1[1,1]| combinedcountbyholiday$start.station.id == combinedcountbyholiday1[2,1]|combinedcountbyholiday$start.station.id == combinedcountbyholiday1[3,1]|combinedcountbyholiday$start.station.id == combinedcountbyholiday1[4,1]|combinedcountbyholiday$start.station.id == combinedcountbyholiday1[5,1],]
+
+#stations with the 5 highest deficits
+bottomcombinedcountbyholiday <- combinedcountbyholiday[combinedcountbyholiday$start.station.id == combinedcountbyholiday1[nrow(combinedcountbyholiday1), 1]| combinedcountbyholiday$start.station.id == combinedcountbyholiday1[nrow(combinedcountbyholiday1)-1, 1]|combinedcountbyholiday$start.station.id == combinedcountbyholiday1[nrow(combinedcountbyholiday1)-2, 1]|combinedcountbyholiday$start.station.id == combinedcountbyholiday1[nrow(combinedcountbyholiday1)-3, 1]|combinedcountbyholiday$start.station.id == combinedcountbyholiday1[nrow(combinedcountbyholiday1)-4, 1],]
+#bind the rows of top and bottom 5 stations
+topbottombyholiday <- rbind(topcombinedcountbyholiday,bottomcombinedcountbyholiday)
+
+#make a plot that shows surplus(deficit) by holiday for 5 stations
+#head(combinedcountbyholiday, n= sum(holidaycountedstation[1:5,2]))%>%
+ggplot(data = topbottombyholiday, aes(x= holiday, y= dif))+geom_col(fill = "darkgreen")+facet_wrap("start.station.id")+theme(axis.text.x = element_text(angle=90, hjust=1))
+
+#aggregate max dif by month
+as.data.frame(aggregate(combinedcountbyholiday$dif, by = list(Holiday = combinedcountbyholiday$holiday), FUN = max))-> holidaysurplus
+
+#make a for loop to go through and get the stations tied to the max surplus
+for(x in 1:nrow(holidaysurplus)){
+holidaysurplus$stations[x] <- as.character(combinedcountbyholiday[combinedcountbyholiday$dif == holidaysurplus$x[x] & combinedcountbyholiday$holiday == holidaysurplus$Holiday[x], 1])
+}
+#reconvert to factor
+holidaysurplus$stations <- as.factor(holidaysurplus$stations)
+
+#merge with lat/lon data and rename vector to "Surplus" 
+unique(merge(holidaysurplus, citibikesample[,c(4,6:7)], by.x = "stations", by.y = "start.station.id"))%>%rename( Surplus = x) -> holidaysurplus
+
+
+#aggregate min dif by hour
+as.data.frame(aggregate(combinedcountbyholiday$dif, by = list(Holiday = combinedcountbyholiday$holiday), FUN = min))-> deficitholiday
+
+#make a for loop to go through and get the stations tied to the largest deficits
+for(x in 1:nrow(deficitholiday)){
+deficitholiday$stations[x] <- as.character(combinedcountbyholiday[combinedcountbyholiday$dif == deficitholiday$x[x] & combinedcountbyholiday$holiday == deficitholiday$Holiday[x], 1])
+}
+
+#reconvert to factor
+deficitholiday$stations <- as.factor(deficitholiday$stations)
+
+#merge with lat/lon data and rename vector to "Deficit" 
+unique(merge(deficitholiday, citibikesample[,c(4,6:7)], by.x = "stations", by.y = "start.station.id"))%>%rename( Deficit = x) -> deficitholiday
+```
+
+
+
+
+
+
+
+
+
+
+The median surplus(deficit) data holidays illustrates that there no or minimal persistent traffic asymmetries caused by holidays. Because the average data may be skewed by extreme values, it is worth looking at this median data instead to see if the problem is meaninful or due to an outlier. The largest surplus on Christmas is `r max(combinedcountbyholiday[combinedcountbyholiday$holiday == "USChristmasDay", 5], na.rm = TRUE)`, `r max(combinedcountbyholiday[combinedcountbyholiday$holiday == "USGoodFriday", 5], na.rm = TRUE)` on Good Friday, and `r max(combinedcountbyholiday[combinedcountbyholiday$holiday == "USLaborDay", 5], na.rm = TRUE)` on Labor Day. 
+
+
+
+### Holiday Top Surplus Stations Map
+```{r}
+#coordinates for four are the same, introducing some random noise to separate out a bit will
+  holidaysurplus$start.station.latitude <- ifelse(duplicated(holidaysurplus$start.station.latitude) == TRUE & duplicated(holidaysurplus$start.station.longitude)==TRUE, jitter(holidaysurplus$start.station.latitude, factor = 0.01, amount = 0.001), holidaysurplus$start.station.latitude)
+
+
+pal <- colorFactor(palette = rainbow(length(levels(holidaysurplus$Holiday))), domain = holidaysurplus$Holiday)
+#map homicides as red circles and rental properties with popup of relevant info
+  leaflet(holidaysurplus)%>%
+  addTiles() %>%
+  addCircleMarkers(lng = ~start.station.longitude, lat = ~start.station.latitude, color = ~pal(Holiday),  radius = 5, opacity = 20, popup = paste("Station ID:", holidaysurplus$stations, "<br>","Surplus:", holidaysurplus$Surplus, "<br>", "Holiday:", holidaysurplus[,2]))%>%
+    addLegend(position = "bottomright", pal = pal, values = holidaysurplus$Holiday)%>%
+  setView(-73.96,40.75, zoom = 9) 
+  
+  holidaysurplus
+```
+
+
+As a macro observation, similarly colored markers are all clustered by each other. This means that users are arriving at the same location close to each other.
+
+
+### Holiday Deficit Stations Map
+```{r}
+#coordinates for four are the same, introducing some random noise to separate out a bit will
+  deficitholiday$start.station.latitude <- ifelse(duplicated(deficitholiday$start.station.latitude) == TRUE & duplicated(deficitholiday$start.station.longitude)==TRUE, jitter(deficitholiday$start.station.latitude, factor = 0.01, amount = 0.001), deficitholiday$start.station.latitude)
+
+
+pal <- colorFactor(palette = rainbow(length(levels(deficitholiday$Holiday))), domain = deficitholiday$Holiday)
+#map homicides as red circles and rental properties with popup of relevant info
+  leaflet(deficitholiday)%>%
+  addTiles() %>%
+  addCircleMarkers(lng = ~start.station.longitude, lat = ~start.station.latitude, color = ~pal(Holiday),  radius = 5, opacity = 20, popup = paste("Station ID:", deficitholiday$stations, "<br>","Deficit:", deficitholiday$Deficit, "<br>", "Holiday:", deficitholiday[,2]))%>%
+    addLegend(position = "bottomright", pal = pal, values = deficitholiday$Holiday)%>%
+  setView(-73.96,40.75, zoom = 9) 
+  
+  deficitholiday
+```
+
+
+
+# Animation of Asymmetric Traffic
+## Barplot
+```{r}
+
+
+#make an animation that shows surplus(deficit) for each day and leave a shadow 
+#surplusbarplot + transition_time(day) + labs(title = "Day: {frame_time}")  + shadow_wake(wake_length = 0.1, alpha = FALSE)
+
+```
+
+## Line Graph
+```{r}
+#make an animation that draws a line graph of surplus(deficit) for each day 
+surplusplot + transition_reveal(day)
+```
+
+# Dynamic Pricing Model
+## Static Limits Dynamic Pricing Model
+Ignoring current pricing schemes, craft a new pricing model driven by asymmetric traffic to help cope with the work-induced traffic asymmetries. Assume after analyzing price data, maximum WTP = $8 and the minimum price city bike is willing to charge is $2.  
+```{r}
+#count number of times per usertype per hour that a start station is used
+startstationbyroundedhour <- count(datafortime, start.station.id, usertype, roundedhour)
+
+#count number of times per usertype per hour that a end station is used
+endstationbyroundedhour <- count(datafortime, end.station.id, usertype, roundedhour)
+
+#combine df's by station id and month
+combinedcountbyroundedhour <- merge(startstationbyroundedhour, endstationbyroundedhour, by.x = c("start.station.id","usertype","roundedhour"), by.y = c("end.station.id","usertype","roundedhour"))
+
+#find surplus(deficit) and make a new vector
+combinedcountbyroundedhour$dif <- c(combinedcountbyroundedhour$n.y - combinedcountbyroundedhour$n.x)
+
+library(fitdistrplus)
+#see what fits best
+#descdist(combinedcountbyroundedhour$dif)
+norm_dist <- fitdist(combinedcountbyroundedhour$dif, "norm")
+plot(norm_dist)
+#appears that there are more extreme values than expected for a normal distribution
+
+#assume when have full data, it will be closer to a true normal distribution
+#static pricing scheme using normally distributed probabilities that weight a price between $2 and $8 based on surplus - incentivize people to rent from surplus stations
+combinedcountbyroundedhour$pricing <- ifelse(8*(1-pnorm(combinedcountbyroundedhour$dif, mean(combinedcountbyroundedhour$dif, na.rm = TRUE), sd(combinedcountbyroundedhour$dif, na.rm = TRUE))) < 2, 2,8*(1-pnorm(combinedcountbyroundedhour$dif, mean(combinedcountbyroundedhour$dif, na.rm = TRUE), sd(combinedcountbyroundedhour$dif, na.rm = TRUE))))
+
+#make new df that is filtered for station id in first row
+combinedcountbyroundedstation <- combinedcountbyroundedhour[combinedcountbyroundedhour$start.station.id == combinedcountbyroundedhour[1,1],]
+
+#head(combinedcountbyroundedhour[sort(combinedcountbyroundedhour$pricing, decreasing = TRUE),]) -> topcombindedcountbyroundedhour
+#tail(combinedcountbyroundedhour[sort(combinedcountbyroundedhour$pricing, decreasing = TRUE),]) -> bottomcombinedcountbyroundedhour
+#rbind(topcombindedcountbyroundedhour,bottomcombinedcountbyroundedhour)
+
+#observe how surplus(deficit) is related to pricing scheme
+ggplot(combinedcountbyroundedhour, aes(x=dif, y=pricing))+geom_line(colour = "darkgreen") + xlab("Surplus(Deficit)") + ylab("Price ($)") + ggtitle("Pricing to Surplus(Deficit)") 
+
+#observe how price changes with surplus(deficit) by hour
+ggplot(combinedcountbyroundedstation, aes(x = roundedhour))+geom_line(aes(y = pricing),color = "darkgreen") + geom_line(aes(y= dif),color = "yellowgreen")+scale_y_continuous(name = "Price ($)", sec.axis = sec_axis(~.*1, name ="Surplus(Deficit)"))+theme(axis.title.y = element_text(color = "darkgreen"), axis.title.y.right = element_text(color = "yellowgreen"))+ggtitle("Price and Surplus(Deficit) Hourly") 
+
+```
+
+
+
+
+
+
+
+
+
+
+This dynamic pricing model allows City Bike to use a price scheme to help alleviate the asymmetric traffic issue that is seen during work "rush hours". By updating pricing based on the hour, City Bike would be able to charge higher prices to rent from stations with high deficits and lower prices for stations with higher surpluses. Because stations are so close together this would not inconvenience individuals too much. However, because the work rush hours tend to create a situation where bike stations near residential and transit stations have a deficit in the morning while those near work have a surplus, these stations may be spread out. Therefore, I recommend excluding the previously identified asymmetries that are created largely by work rush hours and will automatically even out. This will help to even out those stations that experience asymmetries due to fluke leisure travel. Another way to help identify these stations beyond the analysis provided above would be to offer a business customer program. These bikes could be tracked separately and used to identify these self-correcting work rush hour induced asymmetries. 
+For leisure travel, users would favor stations that have surpluses and City Bike would have to use fewer resources in correcting the asymmetric traffic. Again, because stations are so close to each other and we have separated the work "rush hour" asymmetries from the leisure travel asymmetries, the evening of traffic would be beneficial and it is unlikely that City Bike would lose many customers to the price increase who would instead choose a nearby surplus station and decrease traffic asymmetries.
+
+
+## Embedded Rshiny Dynamic Pricing
+```{r}
+#See as a separate file
+#allow user to change bounds of pricing scheme using rshiny
+#write.csv(combinedcountbyroundedhour,"Rshinydynamicpricing.csv")
+#library(shiny)
+#shinyApp(
+
+  #create user interface with min price and max price inputs and two outputs - one a plot of surplus to price and another a table of prices and related data given pricing criteria
+ # ui <- fluidPage(
+      #numericInput("MinPrice", "Enter Your Minimum Price Here", 2),
+      #numericInput("MaxPrice", "Enter Maximum Price Here", 8), 
+      #plotOutput("results"),
+    #  dataTableOutput("list")
+   # ),
+  
+  #create server
+  #server <- function(input, output){
+    
+  #create reactive variable pricing that reacts to changing price input criteria
+  #pricing <- reactive({
+    
+   #combinedcountbyroundedhour$pricing <- ifelse(input$MaxPrice*(1-pnorm(combinedcountbyroundedhour$dif, mean(combinedcountbyroundedhour$dif, na.rm = TRUE), sd(combinedcountbyroundedhour$dif, na.rm = TRUE))) < input$MinPrice, input$MinPrice,input$MaxPrice*(1-pnorm(combinedcountbyroundedhour$dif, mean(combinedcountbyroundedhour$dif, na.rm = TRUE), sd(combinedcountbyroundedhour$dif, na.rm = TRUE))))
+  
+ # })
+  
+  #specify output plot - shows line graph of surplus(deficit) to pricing reactive variable
+ # output$results <- renderPlot({
+  #ggplot(combinedcountbyroundedhour,aes(x=dif, y=pricing()))+geom_line()
+ #   })
+  
+  #specify output data table - shows pricing for changing price inputs
+ # output$list <- renderDataTable({
+   # cbind(pricing(), combinedcountbyroundedhour)
+    
+ # })
+#},
+
+#because embedding in rmarkdown, creating enough space for it to display
+#options = list(height = 500)
+#)
+```
+
+# Follow Bike
+Follow bike 35051.
+```{r}
+
+
+#make new df with relevant vectors from sample
+# biketravels <- citibikesample[,c(2:4,6:8,10:12)]
+# 
+# #make uniquebike df which is for bikeid 26483 and arrange by increasing time
+# biketravels <- biketravels[biketravels$bikeid == 35051,]
+# biketravels[sort(biketravels$starttime, decreasing = FALSE),] -> uniquebike
+# 
+# #format as ymdhms
+# uniquebike$starttime <- floor_date(ymd_hms(uniquebike$starttime),"minute")
+# uniquebike$stoptime <- floor_date(ymd_hms(uniquebike$stoptime),"minute")
+# 
+# #for loop to add moved to anywhere the end station is not the next start station
+# for (x in 1:nrow(uniquebike)) {
+#   uniquebike$travel[x] <- ifelse(uniquebike[x+1,3] == uniquebike[x,6],"Not Moved","Moved")
+# } 
+# 
+# #make df's for start and end lat/lon and times
+# startlocationlat <- as.data.frame(uniquebike[,4])
+# endlocationlat <- as.data.frame(uniquebike[,7])
+# startlocationlon <- as.data.frame(uniquebike[,5])
+# endlocationlon <- as.data.frame(uniquebike[,8])
+# starttime <- as.data.frame(uniquebike[,1])
+# endtime <- as.data.frame(uniquebike[,2])
+# 
+# library("schoolmath")
+# 
+# #define a as twice the length of vector so will go until both are entirely weaved
+# a <- 2*nrow(startlocationlat)
+# 
+# #make thing an empty df with doubles 
+# thing <- data.frame(Lat = double())
+# 
+# #make for loop to weave start and end lats together so that end is after start and store in df
+# for (x in 1:a) {
+#   ifelse(x==1, thing[x,1] <- startlocationlat[x,1],ifelse(is.even(x) == FALSE, thing[x,1]<-startlocationlat[(x-((x-1)/2)),1], thing[x,1] <- endlocationlat[(x-(x/2)),1]))
+# }  
+# 
+# #define b as twice the length of vector so will go until both are entirely weaved
+# b <- 2*nrow(startlocationlon)
+# 
+# #make thing1 an empty df with doubles
+# thing1 <- data.frame(Lon = double())
+# 
+# #make for loop to weave start and end lons together so that end is after start and store in df
+# for (x in 1:b) {
+#   ifelse(x==1, thing1[x,1] <- startlocationlon[x,1],ifelse(is.even(x) == FALSE, thing1[x,1]<-startlocationlon[(x-((x-1)/2)),1], thing1[x,1] <- endlocationlon[(x-(x/2)),1]))
+# } 
+# 
+# #define c as twice the length of vector so will go until both are entirely weaved
+# c <- 2*nrow(starttime)
+# 
+# #make timing an empty df with date format
+# timing <- data.frame(Time = POSIXct())
+# 
+# #make for loop to weave start and end times together so that end is after start and store in df
+# for (x in 1:c) {
+#   ifelse(x==1, timing[x,1] <- starttime[x,1],ifelse(is.even(x) == FALSE, timing[x,1]<-starttime[(x-((x-1)/2)),1], timing[x,1] <- endtime[(x-(x/2)),1]))
+# }  
+# 
+# #keep only first vector which is data that has been weaved together
+# finaltravellat <- data.frame(thing[,1])
+# finaltravellon <- data.frame(thing1[,1])
+# finaltime <- data.frame(timing[,1])
+# 
+# #combine weaved vectors into df
+# cbind(finaltime, finaltravellat, finaltravellon) -> pathbike
+# 
+# #get rid of duplicates
+# pathbikeunique <- unique(pathbike[order(pathbike$timing...1., decreasing = FALSE),])
+# 
+# #get map for nyc
+# citymap1 <- get_stamenmap(bbox = c(left = -74.03, bottom = 40.65, right = -73.87, top = 40.87), zoom = 12, maptype = c("terrain"))
+# 
+# #display map and overlay point representing bike and display animation by minute to track bike's movement and get a sense for the speed it traveled
+# ggmap(citymap1) + geom_point(data=pathbikeunique, aes(x= thing1...1., y= thing...1.), colour = "blue", alpha = 0.5, size = 2)+ transition_reveal(along = pathbikeunique$timing...1.)+labs(title = "Date: {frame_along}")-> a
+# animate(a, duration = 91, fps = 20) -> smoothanimation
+# # gif_file("biketravels.gif")
+# anim_save("biketravels.gif", animation = last_animation())
+
+```
+
+
+
+
+
+
+
+
+
+
+The animation allows us to visualize the path of the most traveled bike in our sample. Through this, we are able to get a sense for how frequently the bike is moved, where the bike tends to remain around, and relative speeds of travel.
+
+#### Clear all data except for the original sample
+```{r}
+rm(list=setdiff(ls(), c("citisample", "weather")))
+```
+
+### Weather
+
+```{r}
+# Calculating the distance (mi) travelled for each ride:
+R = 3958  # radius of earth in miles (at New York's latitude)
+citisample$distance <- distHaversine(cbind(citisample$start.station.longitude, citisample$start.station.latitude), cbind(citisample$end.station.longitude, citisample$end.station.latitude), R)
+
+# Fixing the date in the weather data so it matches the merge column in the bike data
+weather$DATE <- str_sub(weather$DATE, 1, nchar(as.character(weather$DATE))-5)
+
+```
+
+#### Create a table with data grouped by date
+```{r}
+avgdata <- citisample %>%
+  group_by(mergedate) %>%
+  summarize(count = n(),
+            dist = mean(distance, na.rm = TRUE),
+            dur = mean(tripduration, na.rm = TRUE),
+            speed = dist/dur)
+```
+
+#### Merge weather data and avg by date data
+```{r}
+combined_avg <- merge(avgdata, weather, by.x = "mergedate", by.y = "DATE")
+#str(combined_data)
+head(combined_avg)
+```
+
+#### Making graphs to show the relationships between different weather conditions and citibike data
+#### First, we look at impact of temperature on number of rides
+```{r}
+# Impact of temp (Took an average)
+baseplot <- ggplot(data = combined_avg, aes(x = TAVG, y = count))
+baseplot + geom_point(size = 3, alpha = .5, color = "yellowgreen") + geom_smooth(color = "darkgreen")
+```
+
+Here we see that the number of bike rides follows a general upward trend until an average temperature of around 72-77, then the number of rides starts to decrease. We can also separate these averages by variables such as weekday/weekend and gender to see if there is a difference in the effect. 
+
+##### Looking at how number of rides is affected by temp during the weekdays/weekends. 
+```{r}
+# Seperate the avg data by weekday/weekend
+avgdata1 <- citisample %>%
+  group_by(mergedate, dayid) %>%
+  summarize(count = n(),
+            dist = mean(distance, na.rm = TRUE),
+            dur = mean(tripduration, na.rm = TRUE),
+            speed = dist/dur)
+combined_Week <- merge(avgdata1, weather, by.x = "mergedate", by.y = "DATE")
+
+# Make a set of plots
+baseplot_Week <- ggplot(data = combined_Week, aes(x = TAVG, y = count))
+baseplot_Week + geom_point(size = 3, alpha = 0.5, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~ dayid)
+```
+
+We see that weekday and weekend look pretty similar, except that the weekend graph has a steeper slope going up to the peak. This makes sense because during the weekend, people who are using bikes are more likely using them for leisure, and so they can easily decide not to use a bike if the temperature is not perfect. However, during the weekday, many bike riders are riding to work, and they have to use a bike no matter the temperature. 
+
+##### Looking at how number of rides is affected by temp based on gender. 
+```{r}
+avgdata2 <- citisample %>%
+  group_by(mergedate, gender, dayid) %>%
+  summarize(count = n(),
+            dist = mean(distance, na.rm = TRUE),
+            dur = mean(tripduration, na.rm = TRUE),
+            speed = dist/dur)
+combined_gender <- merge(avgdata2, weather, by.x = "mergedate", by.y = "DATE")
+
+# Make a set of plots
+baseplot_gender <- ggplot(data = combined_gender, aes(x = TAVG, y = count))
+baseplot_gender + geom_point(size = 2, alpha = 0.5, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~ gender)
+```
+
+Here we run into the pattern of having a large difference in ride numbers across genders, the male shows drastically larger ridership than the female, together with steeper up and down slope. This could be due to the fact that there are simply more male riders than female riders. In general, we can still see that the same curve shape is present across all gender categories. 
+
+##### Looking at how number of rides is affected by temp based on usertype. 
+```{r}
+avgdata3 <- citisample %>%
+  group_by(mergedate, usertype, dayid) %>%
+  summarise(count = n(),
+            dist = mean(distance, na.rm = TRUE),
+            dur = mean(tripduration, na.rm = TRUE),
+            speed = dist/dur)
+combined_userT <- merge(avgdata3, weather, by.x = "mergedate", by.y = "DATE")
+
+# Make a set of plots
+baseplot_userT <- ggplot(data = combined_userT, aes(x = TAVG, y = count, colour = dayid))
+baseplot_userT + geom_point(size = 2, alpha = 0.5, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~usertype)
+```
+
+The same pattern as before is here, where the number of total bikes is very different between customers and subscribers. It is obvious that subscribers contribute more to the number of ridership, and we can again see that the general curve is the same. Interestingly, customers ride more at weekends than weekdays while subscribers shows the opposite. This indicates that most subscribers use citibikes as commuting vehicles, and most customers use them for leisure.
+
+##### Looking at how number of rides is affected by temp based on ageGroup. 
+```{r}
+avgdata <- citisample %>%
+  group_by(mergedate, agegroup, dayid) %>%
+  summarize(count = n(),
+            dist = mean(distance, na.rm = TRUE),
+            dur = mean(tripduration, na.rm = TRUE),
+            speed = dist/dur)
+combined_age <- merge(avgdata, weather, by.x = "mergedate", by.y = "DATE")
+
+# Make a set of plots
+baseplot_age <- ggplot(data = combined_age, aes(x = TAVG, y = count, colour = dayid))
+baseplot_age + geom_point(size = 2, alpha = .2, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~ agegroup)
+```
+
+From the perspective of weekday and weekend, it shows similar patterns to the overall influence by temp above between different age group. Moving to the difference of ridership between age groups, it is manifested that people within 20-40 ride most, and people over 40 years old follow, leaving young people under 20 with nearly no ridership. Lower ridership for people over 40 might be because they have enough financial support to own cars or other more comfortable ways than riding.
+
+#### Next, we will look at how temperature affects average speed of rides. 
+```{r}
+# Impact of temperature
+baseplot <- ggplot(data = combined_avg, aes(x = TAVG, y = speed))
+baseplot + geom_point(size = 3, alpha = 0.5, color = "yellowgreen") + geom_smooth(color = "darkgreen")
+```
+
+We can see that average speed differs a lot, but the general trend is that average speed decreases as temperatures increase. 
+
+##### We can also see if different variables alter this relationship the same way we did with the affect of temperature on number of rides. 
+
+##### The influence of average temperature on speed based on gender.
+```{r}
+# Make a set of plots based on gender 
+baseplot_gender <- ggplot(data = combined_gender, aes(x = TAVG, y = speed))
+baseplot_gender + geom_point(size = 2, alpha = 0.5, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~ gender)
+```
+
+This graph shows that on average, people whose gender is unknown are slower than the other genders, and women's speed drop faster than men as the temp increases. But the overall effect of increasing temperatures on speed does not change; there is still a slight decrease in speed as temperature rises. There is also a notable extra dip in the average speed of gender 0 at higher temps, which is interesting because that was also the peak in terms of number of rides. Maybe busy traffic limits the speed. 
+
+##### The influence of average temperature on speed based on weekday/weekend.
+
+```{r}
+# Make a set of plots based on dayid
+baseplot_Week <- ggplot(data = combined_Week, aes(x = TAVG, y = speed))
+baseplot_Week + geom_point(size = 3, alpha = 0.5, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~ dayid)
+```
+
+During the weekdays, average speed declines slightly with temperature. During the weekend, average speed is at a maximum when it is around 40 degrees, and a minimum when it is at 65 degrees. This strange pattern is hard to explain based on existing data, but we can speculate that maybe when it's too cold or hot, people prefer to ride faster to arrive their destination as soon as possible. While as the temp is closing to 74 degrees, people feel more comfortable and prefer to enjoy the riding. 
+
+```{r}
+# Make a set of plots
+baseplot_age <- ggplot(data = combined_age, aes(x = TAVG, y = speed, colour = dayid))
+baseplot_age + geom_point(size = 2, alpha = .2, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~ agegroup)
+```
+
+The overall patterns of weeday and weekend are similar to the graphs above, but slight discrepancies exsit between age groups. For young people (under 20), the slopes are steeper all the time, significantly smaller ridership when average temp increases. For people between 20 to 40, there's no huge change of speed on weekdays. This makes sense because when they are riding to work, time is limited. 
+
+#### Next we look at the impact of wind speed on bike data
+```{r}
+# Impact of Wind Speed
+baseplot <- ggplot(data = combined_avg, aes(x = AWND, y = count))
+baseplot + geom_point(size = 3, alpha = 0.5, color = "yellowgreen") + geom_smooth(color = "darkgreen")
+
+```
+
+The peak number of rides occurs when wind speed is a little more than 0, which suggests that people enjoy biking when there is a bit of a breeze outside. However, anything more than that and the number of rides begins to decrease steadily as wind increases. 
+
+#### We looked at how this differs across demographics.
+##### First, 
+```{r}
+baseplot_Week <- ggplot(data = combined_Week, aes(x = AWND, y = count, colour = dayid))
+baseplot_Week + geom_point(size = 3, alpha = .5, color = "yellowgreen") + geom_smooth(color = "darkgreen")
+baseplot_gender <- ggplot(data = combined_gender, aes(x = AWND, y = count, colour = dayid))
+baseplot_gender + geom_point(size = 3, alpha = .5, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~ gender)
+```
+
+From the first graph, it is evident that fluctuates smaller than that of weekend. On weekends, there are two different peaks on the graph of the sample data we used, but is still decreasing overall. 
+
+In the second graph, the patterns are similar to the overall one. Meanwhile, the order of the number of rides, male > female > unknown gender, is consistent with the analysis based on gender in the temp part.
+
+Graphs based on and age groups and user type displayed the same trend. The differences between customers and subscribers and among different age groups are identical with that in temperature part, so we did not include these graphs. 
+
+
+#### We can also look at how Average wind Speed affects bike speed. 
+```{r}
+# Impact of Wind Speed
+baseplot <- ggplot(data = combined_avg, aes(x = AWND, y = speed))
+baseplot + geom_point(size = 3, alpha = .5, color = "yellowgreen") + geom_smooth(color = "darkgreen")
+```
+
+We see that the speed actually slightly increases as wind increases, but only very slightly. This is common as wind does favor to speed when we are following the wind. 
+
+#### We looked at how this differs across demographics.
+##### First, 
+```{r}
+baseplot_Week <- ggplot(data = combined_Week, aes(x = AWND, y = speed))
+baseplot_Week + geom_point(size = 3, alpha = .5, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~ dayid)
+baseplot_userT <- ggplot(data = combined_userT, aes(x = AWND, y = speed, colour = dayid))
+baseplot_userT + geom_point(size = 3, alpha = .5, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~ usertype)
+baseplot_age <- ggplot(data = combined_age, aes(x = AWND, y = speed, colour = dayid))
+baseplot_age + geom_point(size = 3, alpha = .5, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~ agegroup)
+```
+
+From the first graph, the speed on weekdays doesn't increase considerably as the wind speed increases while the speed on weekends shows the opposite. This could be because people are not flexible in choosing riding direction on their way to work, which means someone have to ride against the wind, impeding the increase of average speed based on the sample. However, people have more rights to choose their destination, so they prefer to choose the direction following the wind.
+
+Moving to the second graph, subscribers' speed is higher drastically than that of customers. From the website of our dataset resource, we learned that customer is defined as 24-hour pass or 3-day pass user. We think these people are more likely to be visitors which tend to pursue relax and comfort during their trips. On the contrary, we know that most subscribers are riding to work from our previous analysis. Thus, it's easy to understand that their faster speed is to save time. 
+
+People from 20 to 40 seems to be faster which could be assigned to their stronger physical bodies. The steeper up slope in the higher wind speed range for young people (under 20) could indicate their preference of pursuing speed and excitement. In this case, they will require bikes with higher quality.
+
+#### We can also look at the impact of rainfall on bike data
+
+```{r}
+# Impact of Rain
+baseplot <- ggplot(data = combined_avg, aes(x = PRCP, y = count))
+baseplot + geom_point(size = 3, alpha = 0.5, color = "yellowgreen") + geom_smooth(color = "darkgreen")
+
+```
+
+Basically, the number of rides decreases when it rains more. However, there will be a trough at around 0.1 PRCP and a second peak around 0.2 PRCP, which could be because when it's just a light rain, people prefer to walk with an umbrella or some people don't care about small rain. While when it rains a little bit heavier people prefer to ride to shorten their time on the way. As PRCP increases continuously, people seldom wants to ride in the heavy rain or choose alternative vehicles. It's really interesting but also confusing to see a trend up at the large range of PRCP. Since the data points is few, maybe some specific events happens on those days which caused lots of people use citibikes. 
+
+#### We again looked at how this differs across demographics.
+##### First, 
+```{r}
+baseplot_Week <- ggplot(data = combined_Week, aes(x = PRCP, y = count, colour = dayid))
+baseplot_Week + geom_point(size = 3, alpha = .5, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~dayid)
+```
+
+There is an apparent peak in the curve of weekend in the first graph, even going beyond the curve of weekday. This is also at point around the slight peak of weekday. We infer that it could be because people care more about their appearance on weekdays. So they may choose other ways to work. Such worries don't matter on weekends.
+
+Graphs based on and age groups, user type, and gender displayed the same trend as the general graph with no interesting findings, so we did not include these graphs. 
+
+
+```{r}
+# impact of rain on speed
+combined_avg %>%
+  ggplot(aes(PRCP, speed)) +
+  geom_point(size = 3, alpha = 0.5, color = "yellowgreen") + geom_smooth(color = "darkgreen")
+
+# taking the relationship between wind speed and PRCP into consideration
+combined_avg %>%
+  ggplot(aes(PRCP, AWND)) +
+  geom_point(size = 3, alpha = 0.5, color = "yellowgreen") + geom_smooth(color = "darkgreen")
+```
+
+Generally speaking, the speed will be faster as the PRCP increases which matches our common sense because everyone wants to arrive the destination as quick as possible when it rains. If we take the relationship between wind speed and PRCP into consideration, the wind also has some influences on riding speed. For example, the trough around 0.25 PRCP may be related to the lower wind.
+
+#### In addition, we want to explore if things changes at different period of the day.
+
+```{r}
+# The impact of rain on ridership and speed in the different period of the day
+avgdata_period <- citisample %>%
+  group_by(mergedate, period, dayid) %>%
+  summarize(count = n(),
+            dist = mean(distance, na.rm = TRUE),
+            dur = mean(tripduration, na.rm = TRUE),
+            speed = dist/dur)
+
+combined_period <- merge(avgdata_period, weather, by.x = "mergedate", by.y = "DATE")
+
+# impact on ridership
+baseplot_period <- ggplot(data = combined_period, aes(x = PRCP, y = count))
+baseplot_period + geom_point(size = 3, alpha = 0.5, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~period)
+```
+
+We define morning from 6 am to 12 pm, afternoon from 12 pm to 18 pm and the rest is assigned to evening. The pattern at different period is similar to the overall one above, but the fluctuation is smaller in the evening. The ridership is slightly bigger in the afternoon than morning especially when there is no rains.
+
+```{r}
+
+# impact on speed
+baseplot_period <- ggplot(data = combined_period, aes(x = PRCP, y = speed, colour = dayid))
+baseplot_period + geom_point(size = 3, alpha = 0.5, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_grid(~period)
+
+```
+
+Although the ridership is more in the afternoon, the average speed is slower than that of morning on weekdays, while similar level to that in the evening. This may indicates that people are more likely in a rush when they go to the office. When it comes to weekend, the speeds in different period are at similar level.
+
+#### We also attempted to take a look at how snow affects bike data
+
+```{r}
+# Impact of Snowfall
+baseplot <- ggplot(data = combined_avg, aes(x = SNOW, y = count))
+baseplot + geom_line(color = "darkgreen") 
+```
+
+```{r}
+# Impact of Snow Depth
+baseplot <- ggplot(data = combined_avg, aes(x = SNWD, y = count))
+baseplot + geom_line(color = "darkgreen")
+```
+
+Unfortunately, as we can see from these two graphs, we do not have enough data points in 2019 where there was snow data, so we can't make any conclusions about how snow affects bike data. 
+
+
