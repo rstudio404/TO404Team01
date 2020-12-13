@@ -98,49 +98,6 @@ citisample$agegroup <- ifelse(citisample$age < 20, "<20", ifelse(citisample$age 
 sample19 <- citisample
 ```
 
-### Bikes
-```{r}
-# make column that specifies distance per trip in miles
-sample19$distance <- haversine(sample19$start.station.latitude, sample19$start.station.longitude, sample19$end.station.latitude, sample19$end.station.longitude)*0.621371
-
-# group sample by bikeid and distance
-bikes <- sample19 %>% 
-  group_by(bikeid) %>%
-  mutate(distance_per_bike = sum(distance)) %>%
-  mutate(trips_per_bike = n())
-
-# remove duplicate bikeids and create new data frame
-bikes1 <- select(bikes, bikeid, distance_per_bike, trips_per_bike)
-bikes1 <- bikes1[!duplicated(bikes1$bikeid), ]
-
-# create a scatter plot with distance and number of trips
-plot_a <- ggplot(data = bikes1, aes(x = trips_per_bike, y = distance_per_bike, colour = distance_per_bike)) + geom_point(size=1, alpha=0.5) + scale_colour_gradient(low="greenyellow", high="darkgreen") + theme(legend.position = "none")
-plot_a
-
-# identify the most and least used bikes
-mostusedbikes <- head(bikes1[order(bikes1$distance_per_bike, decreasing = TRUE),], n = 100)
-mostusedbikes
-leastusedbikes <- tail(bikes1[order(bikes1$distance_per_bike, decreasing = TRUE),], n = 100)
-leastusedbikes
-```
-
-- Some bikes have been used more than others, which may be an indicator for Citi Bike to check them for maintenance as the tires could be wearing out. As we can see, the distance traveled ranges from 0 miles to `r round(max(bikes1$distance_per_bike),2)` miles. The scatterplot reveals that there is no unusual pattern since the more a bike is booked the greater the distance traveled. 
-
-```{r}
-# create bar plot with num_trips on x_axis
-plot_b <- ggplot(data=bikes1, aes(x=trips_per_bike, fill=..count..)) + geom_bar() + scale_fill_gradient(low="greenyellow", high="darkgreen") + theme(legend.position = "none")
-plot_b
-
-# find quartiles along with extreme percentiles of num_trips
-quantile_num_trips <- quantile(bikes1$trips_per_bike, probs=c(0.01,0.05,0.1,0.25,0.5,0.75,0.9,0.95,0.99,1))
-quantile_num_trips
-```
-- The distribution of the number of trips each bike made in 2019 is skewed right with the mean `r round(mean(bikes1$trips_per_bike),0)` being greater than the median `r quantile_num_trips[5]`.
-- Bike `r bikes1$bikeid[bikes1$trips_per_bike == max(bikes1$trips_per_bike)]` has been used the most times with `r max(bikes1$trips_per_bike)` trips made. Although it may not be the bike that traveled the most distance, it should still have traveled a fair amount as there is a strong positive correlation between number of trips and distance traveled (seen in the scatterplot above). One possible reason could be because Bike `r bikes1$bikeid[bikes1$trips_per_bike == max(bikes1$trips_per_bike)]` has always been circulating in the busier parts of NYC where people tend to bike shorter distances but more frequently.
-- 1% of the bikes have only been used `r quantile_num_trips[1]` times or less throughout the whole year. This could be because:
-  + They have been taken away for maintenance.
-  + There is something wrong with them and should be checked for maintenance.
-  + They were taken to unpopular stations that tend to have a lot of bike surplus and by chance were rarely selected by bikers to ride. 
 
 ### Gender 
 ```{r}
@@ -226,6 +183,51 @@ plot7
 - young or middle-aged adult
 - NYC area resident
 - student or worker
+
+### Bikes
+```{r}
+# make column that specifies distance per trip in miles
+sample19$distance <- haversine(sample19$start.station.latitude, sample19$start.station.longitude, sample19$end.station.latitude, sample19$end.station.longitude)*0.621371
+
+# group sample by bikeid and distance
+bikes <- sample19 %>% 
+  group_by(bikeid) %>%
+  mutate(distance_per_bike = sum(distance)) %>%
+  mutate(trips_per_bike = n())
+
+# remove duplicate bikeids and create new data frame
+bikes1 <- select(bikes, bikeid, distance_per_bike, trips_per_bike)
+bikes1 <- bikes1[!duplicated(bikes1$bikeid), ]
+
+# create a scatter plot with distance and number of trips
+plot_a <- ggplot(data = bikes1, aes(x = trips_per_bike, y = distance_per_bike, colour = distance_per_bike)) + geom_point(size=1, alpha=0.5) + scale_colour_gradient(low="greenyellow", high="darkgreen") + theme(legend.position = "none")
+plot_a
+
+# identify the most and least used bikes
+mostusedbikes <- head(bikes1[order(bikes1$distance_per_bike, decreasing = TRUE),], n = 100)
+mostusedbikes
+leastusedbikes <- tail(bikes1[order(bikes1$distance_per_bike, decreasing = TRUE),], n = 100)
+leastusedbikes
+```
+
+- Some bikes have been used more than others, which may be an indicator for Citi Bike to check them for maintenance as the tires could be wearing out. As we can see, the distance traveled ranges from 0 miles to `r round(max(bikes1$distance_per_bike),2)` miles. The scatterplot reveals that there is no unusual pattern since the more a bike is booked the greater the distance traveled. 
+
+```{r}
+# create bar plot with num_trips on x_axis
+plot_b <- ggplot(data=bikes1, aes(x=trips_per_bike, fill=..count..)) + geom_bar() + scale_fill_gradient(low="greenyellow", high="darkgreen") + theme(legend.position = "none")
+plot_b
+
+# find quartiles along with extreme percentiles of num_trips
+quantile_num_trips <- quantile(bikes1$trips_per_bike, probs=c(0.01,0.05,0.1,0.25,0.5,0.75,0.9,0.95,0.99,1))
+quantile_num_trips
+```
+- The distribution of the number of trips each bike made in 2019 is skewed right with the mean `r round(mean(bikes1$trips_per_bike),0)` being greater than the median `r quantile_num_trips[5]`.
+- Bike `r bikes1$bikeid[bikes1$trips_per_bike == max(bikes1$trips_per_bike)]` has been used the most times with `r max(bikes1$trips_per_bike)` trips made. Although it may not be the bike that traveled the most distance, it should still have traveled a fair amount as there is a strong positive correlation between number of trips and distance traveled (seen in the scatterplot above). One possible reason could be because Bike `r bikes1$bikeid[bikes1$trips_per_bike == max(bikes1$trips_per_bike)]` has always been circulating in the busier parts of NYC where people tend to bike shorter distances but more frequently.
+- 1% of the bikes have only been used `r quantile_num_trips[1]` times or less throughout the whole year. This could be because:
+  + They have been taken away for maintenance.
+  + There is something wrong with them and should be checked for maintenance.
+  + They were taken to unpopular stations that tend to have a lot of bike surplus and by chance were rarely selected by bikers to ride. 
+
 
 #### Clear all data except for the original sample
 ```{r}
