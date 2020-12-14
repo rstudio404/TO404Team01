@@ -1783,9 +1783,9 @@ The peak number of rides occurs when wind speed is a little more than 0, which s
 ##### First, 
 ```{r}
 baseplot_Week <- ggplot(data = combined_Week, aes(x = AWND, y = count, colour = dayid))
-baseplot_Week + geom_point(size = 3, alpha = .5, color = "yellowgreen") + geom_smooth(color = "darkgreen")
+baseplot_Week + geom_point(size = 3, alpha = .5 )+ scale_color_manual(values=c("yellowgreen", "darkgreen")) + geom_smooth()
 baseplot_gender <- ggplot(data = combined_gender, aes(x = AWND, y = count, colour = dayid))
-baseplot_gender + geom_point(size = 3, alpha = .5, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~ gender)
+baseplot_gender + geom_point(size = 3, alpha = .5)+ scale_color_manual(values=c("yellowgreen", "darkgreen")) + geom_smooth() + facet_wrap(~ gender)
 ```
 
 From the first graph, it is evident that fluctuates smaller than that of weekend. On weekends, there are two different peaks on the graph of the sample data we used, but is still decreasing overall. 
@@ -1810,9 +1810,9 @@ We see that the speed actually slightly increases as wind increases, but only ve
 baseplot_Week <- ggplot(data = combined_Week, aes(x = AWND, y = speed))
 baseplot_Week + geom_point(size = 3, alpha = .5, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~ dayid)
 baseplot_userT <- ggplot(data = combined_userT, aes(x = AWND, y = speed, colour = dayid))
-baseplot_userT + geom_point(size = 3, alpha = .5, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~ usertype)
+baseplot_userT + geom_point(size = 3, alpha = .5)+ scale_color_manual(values=c("yellowgreen", "darkgreen")) + geom_smooth() + facet_wrap(~ usertype)
 baseplot_age <- ggplot(data = combined_age, aes(x = AWND, y = speed, colour = dayid))
-baseplot_age + geom_point(size = 3, alpha = .5, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~ agegroup)
+baseplot_age + geom_point(size = 3, alpha = .5)+ scale_color_manual(values=c("yellowgreen", "darkgreen")) + geom_smooth() + facet_wrap(~ agegroup)
 ```
 
 From the first graph, the speed on weekdays doesn't increase considerably as the wind speed increases while the speed on weekends shows the opposite. This could be because people are not flexible in choosing riding direction on their way to work, which means someone have to ride against the wind, impeding the increase of average speed based on the sample. However, people have more rights to choose their destination, so they prefer to choose the direction following the wind.
@@ -1882,7 +1882,7 @@ We define morning from 6 am to 12 pm, afternoon from 12 pm to 18 pm and the rest
 
 # impact on speed
 baseplot_period <- ggplot(data = combined_period, aes(x = PRCP, y = speed, colour = dayid))
-baseplot_period + geom_point(size = 3, alpha = 0.5, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_grid(~period)
+baseplot_period + geom_point(size = 3, alpha = 0.5)+ scale_color_manual(values=c("yellowgreen", "darkgreen")) + geom_smooth() + facet_grid(~period)
 
 ```
 
