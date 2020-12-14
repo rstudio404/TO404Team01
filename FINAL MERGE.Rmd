@@ -507,10 +507,11 @@ unique(merge(deficitmonth, citibikesample[,c(4,6:7)], by.x = "stations", by.y = 
 
 
 
-Our sample data demonstrate that months `r medianmonth[medianmonth$Dif != 0,1]` have a nonzero median deficits. While average data may show differently, it is best to view median data to avoid outliers that may misrepresent the data.  `r medianmonth[medianmonth$Dif == min(medianmonth$Dif),1]` appears to have the greatest median deficit indicating that extra emphasis should go toward addressing asymmetric traffic during this month. However, individual stations have their own trends. Looking at the top 5 surplus and deficit stations by month, we see that most stations tend to maintain a deficit or surplus standing for each month, with a only few having both large surpluses and large dficits. 
+Our sample data demonstrate that months `r medianmonth[medianmonth$Dif != 0,1]` have a nonzero median deficits. While average data may show differently, it is best to view median data to avoid outliers that may misrepresent the data. Month  `r medianmonth[medianmonth$Dif == min(medianmonth$Dif),1]` appears to have the greatest median deficit indicating that extra emphasis should go toward addressing asymmetric traffic during this month. However, individual stations have their own trends. Looking at the top 5 surplus and deficit stations by month, we see that most stations tend to maintain a deficit or surplus standing for each month, with a only few having both large surpluses and large dficits. 
 
 
 These graphs are representative of the stations with the largest 5 surpluses and largest 5 deficits by month. In contrast to the daily data, most of these stations consistently have a cumulative monthly surplus or deficit as evidenced by the directionaly of the bars and the minimal amount of overlap between top 5 surpluses and top 5 deficits. These high consistent surplus stations may be able to take a smaller bike reserve by month on average while the consistent deficit stations may be able to take a higher bike reserve by month on average.
+
 
 
 
@@ -533,6 +534,10 @@ pal <- colorFactor(palette = rainbow(12), domain = monthsurplus$Month)
 ```
 
 
+This map shows which stations are the best candidates to provide a lower bike reserve to on average by month. Please see the map for a table version of this map in case the overlap makes it difficult to discern the months.
+
+
+
 
 ### Top Deficit Stations By Month
 ```{r}
@@ -552,7 +557,7 @@ pal <- colorFactor(palette = rainbow(12), domain = deficitmonth$Month)
 ```
 
 
-This map shows which stations are the best candidates to provide a higher bike reserves to on average by month. Please see the map for a table version of this map in case the overlap makes it difficult to discern the months.
+This map shows which stations are the best candidates to provide a higher bike reserve to on average by month. Please see the map for a table version of this map in case the overlap makes it difficult to discern the months.
 
 
 
@@ -798,7 +803,7 @@ deficithour <- deficithour[order(deficithour$Deficit, decreasing = FALSE),]
 Cumulative hourly data shows a work rushhour pattern. Interestingly, the morning tends to have larger deficits, indicating either that individuals are leaving at about the same time to get to work or they are leaving from the same few areas but are going to work across many areas. Conversely, the evening surplus either indicates that everyone is arriving home at around the same time or the same trend as described before but in reverse - people are going from scattered work areas and dropping bikes off at a more concentrated few places. The largest deficit is `r min(medianhour$Dif)` and it occurs at hour `r medianhour[medianhour$Dif == min(medianhour$Dif),1]`. The largest surplus is `r max(medianhour$Dif)` and it occurs at hour `r medianhour[medianhour$Dif == max(medianhour$Dif),1]`. This is important because this is a self-correcting traffic asymmetry of sorts. It would not be prudent to significantly change the bike reserves at frequent work stations because the surplus reserve from the night before is important for the morning rush. 
 
 
-Once we get into hourly data by station, we see that the stations with the largest surpluses also have some of the largest deficits. We can see that for almost all of these stations, there is a large opposing flux in the evening. This is a great proxy for estimating flow of traffic. For example, the stations where we see a large deficit in the morning are likely by a large number of individuals' residence or a transit station and they are taking bikes from these to go to work while the large opposing surplus at the end of the day shows that they are returning to their home station. On the flip side, stations with a large morning surplus are likely by a large number of those individuals' work location and it is where they are dropping the bikes off. When integrating this with the average hourly data, we see that that morning commute is the most uneven. Perhaps we can extrapolate that this is because they are on average roughly evening out the asymmetric traffic incurred in the morning by returning it to the same station. The reason it likely isn't perfectly zero is because some may return to an adjacent station and there are non-business commuters taking bikes out for a ride. 
+Once we get into hourly data by station, we see that the stations with the largest surpluses also have some of the largest deficits. We can see that for almost all of these stations, there is a large opposing flux in the evening. This is a great proxy for estimating flow of traffic. For example, the stations where we see a large deficit in the morning are likely by a large number of individuals' residence or a transit station and they are taking bikes from these to go to work while the large opposing surplus at the end of the day shows that they are returning to their home station. On the flip side, stations with a large morning surplus are likely by a large number of those individuals' work location and it is where they are dropping the bikes off. 
 
 
 
@@ -1515,84 +1520,90 @@ Follow bike 35051.
 ```{r}
 
 
+library("schoolmath")
+
 #make new df with relevant vectors from sample
-# biketravels <- citibikesample[,c(2:4,6:8,10:12)]
-# 
-# #make uniquebike df which is for bikeid 26483 and arrange by increasing time
-# biketravels <- biketravels[biketravels$bikeid == 35051,]
-# biketravels[sort(biketravels$starttime, decreasing = FALSE),] -> uniquebike
-# 
-# #format as ymdhms
-# uniquebike$starttime <- floor_date(ymd_hms(uniquebike$starttime),"minute")
-# uniquebike$stoptime <- floor_date(ymd_hms(uniquebike$stoptime),"minute")
-# 
-# #for loop to add moved to anywhere the end station is not the next start station
-# for (x in 1:nrow(uniquebike)) {
-#   uniquebike$travel[x] <- ifelse(uniquebike[x+1,3] == uniquebike[x,6],"Not Moved","Moved")
-# } 
-# 
-# #make df's for start and end lat/lon and times
-# startlocationlat <- as.data.frame(uniquebike[,4])
-# endlocationlat <- as.data.frame(uniquebike[,7])
-# startlocationlon <- as.data.frame(uniquebike[,5])
-# endlocationlon <- as.data.frame(uniquebike[,8])
-# starttime <- as.data.frame(uniquebike[,1])
-# endtime <- as.data.frame(uniquebike[,2])
-# 
-# library("schoolmath")
-# 
-# #define a as twice the length of vector so will go until both are entirely weaved
-# a <- 2*nrow(startlocationlat)
-# 
-# #make thing an empty df with doubles 
-# thing <- data.frame(Lat = double())
-# 
-# #make for loop to weave start and end lats together so that end is after start and store in df
-# for (x in 1:a) {
-#   ifelse(x==1, thing[x,1] <- startlocationlat[x,1],ifelse(is.even(x) == FALSE, thing[x,1]<-startlocationlat[(x-((x-1)/2)),1], thing[x,1] <- endlocationlat[(x-(x/2)),1]))
-# }  
-# 
-# #define b as twice the length of vector so will go until both are entirely weaved
-# b <- 2*nrow(startlocationlon)
-# 
-# #make thing1 an empty df with doubles
-# thing1 <- data.frame(Lon = double())
-# 
-# #make for loop to weave start and end lons together so that end is after start and store in df
-# for (x in 1:b) {
-#   ifelse(x==1, thing1[x,1] <- startlocationlon[x,1],ifelse(is.even(x) == FALSE, thing1[x,1]<-startlocationlon[(x-((x-1)/2)),1], thing1[x,1] <- endlocationlon[(x-(x/2)),1]))
-# } 
-# 
-# #define c as twice the length of vector so will go until both are entirely weaved
-# c <- 2*nrow(starttime)
-# 
-# #make timing an empty df with date format
-# timing <- data.frame(Time = POSIXct())
-# 
-# #make for loop to weave start and end times together so that end is after start and store in df
-# for (x in 1:c) {
-#   ifelse(x==1, timing[x,1] <- starttime[x,1],ifelse(is.even(x) == FALSE, timing[x,1]<-starttime[(x-((x-1)/2)),1], timing[x,1] <- endtime[(x-(x/2)),1]))
-# }  
-# 
-# #keep only first vector which is data that has been weaved together
-# finaltravellat <- data.frame(thing[,1])
-# finaltravellon <- data.frame(thing1[,1])
-# finaltime <- data.frame(timing[,1])
-# 
-# #combine weaved vectors into df
-# cbind(finaltime, finaltravellat, finaltravellon) -> pathbike
-# 
-# #get rid of duplicates
-# pathbikeunique <- unique(pathbike[order(pathbike$timing...1., decreasing = FALSE),])
-# 
-# #get map for nyc
-# citymap1 <- get_stamenmap(bbox = c(left = -74.03, bottom = 40.65, right = -73.87, top = 40.87), zoom = 12, maptype = c("terrain"))
-# 
-# #display map and overlay point representing bike and display animation by minute to track bike's movement and get a sense for the speed it traveled
-# ggmap(citymap1) + geom_point(data=pathbikeunique, aes(x= thing1...1., y= thing...1.), colour = "blue", alpha = 0.5, size = 2)+ transition_reveal(along = pathbikeunique$timing...1.)+labs(title = "Date: {frame_along}")-> a
-# animate(a, duration = 91, fps = 20) -> smoothanimation
-# # gif_file("biketravels.gif")
-# anim_save("biketravels.gif", animation = last_animation())
+#biketravels <- citibikesample[,c(2:4,6:8,10:12)]
+
+#make uniquebike df for bikeid and arrange by increasing time
+#biketravels[biketravels$bikeid == 35051,] -> uniquebike
+#uniquebike[order(uniquebike$starttime, decreasing = FALSE),] -> uniquebike
+
+
+#format as ymdhms
+#uniquebike$starttime <- floor_date(ymd_hms(uniquebike$starttime),"minute")
+#uniquebike$stoptime <- floor_date(ymd_hms(uniquebike$stoptime),"minute")
+
+#for loop to add moved to anywhere the end station is not the next start station
+#for (x in 1:nrow(uniquebike)) {
+#  uniquebike$travel[x] <- ifelse(uniquebike[x+1,3] == uniquebike[x,6],"Not Moved","Moved")
+#} 
+
+#make df's for start and end lat/lon and times
+#startlocationlat <- as.data.frame(uniquebike[,4])
+#endlocationlat <- as.data.frame(uniquebike[,7])
+#startlocationlon <- as.data.frame(uniquebike[,5])
+#endlocationlon <- as.data.frame(uniquebike[,8])
+#starttime <- as.data.frame(uniquebike[,1])
+#endtime <- as.data.frame(uniquebike[,2])
+
+
+#define a as twice the length of vector so will go until both are entirely weaved
+#a <- 2*nrow(startlocationlat)
+
+#make thing an empty df with doubles 
+#Lat <- data.frame(Lat = double())
+
+#make for loop to weave start and end lats together so that end is after start and store in df
+#for (x in 1:a) {
+  #ifelse(x==1, Lat[x,1] <- startlocationlat[x,1],ifelse(is.even(x) == FALSE, Lat[x,1]<-startlocationlat[(x-((x-1)/2)),1], Lat[x,1] <- endlocationlat[(x-(x/2)),1]))
+#}  
+
+#define b as twice the length of vector so will go until both are entirely weaved
+#b <- 2*nrow(startlocationlon)
+
+#make thing1 an empty df with doubles
+#Lon <- data.frame(Lon = double())
+
+#make for loop to weave start and end lons together so that end is after start and store in df
+#for (x in 1:b) {
+ # ifelse(x==1, Lon[x,1] <- startlocationlon[x,1],ifelse(is.even(x) == FALSE, Lon[x,1]<-startlocationlon[(x-((x-1)/2)),1], Lon[x,1] <- endlocationlon[(x-(x/2)),1]))
+#} 
+
+#define c as twice the length of vector so will go until both are entirely weaved
+#c <- 2*nrow(starttime)
+
+#make timing an empty df with date format
+#timing <- data.frame(Time = POSIXct())
+
+#make for loop to weave start and end times together so that end is after start and store in df
+#for (x in 1:c) {
+ # ifelse(x==1, timing[x,1] <- starttime[x,1],ifelse(is.even(x) == FALSE, timing[x,1]<-starttime[(x-((x-1)/2)),1], timing[x,1] <- endtime[(x-(x/2)),1]))
+#}  
+
+#keep only first vector which is data that has been weaved together
+#finaltravellat <- data.frame(Lat[,1])
+#finaltravellon <- data.frame(Lon[,1])
+#finaltime <- data.frame(timing[,1])
+
+#combine weaved vectors into df
+#cbind(finaltime, finaltravellat, finaltravellon) -> pathbike
+
+#get rid of duplicates
+#pathbikeunique <- unique(pathbike[order(pathbike$timing...1., decreasing = FALSE),])
+
+#get map for nyc
+#citymap1 <- get_stamenmap(bbox = c(left = -74.03, bottom = 40.65, right = -73.87, top = 40.87), zoom = 12, maptype = c("terrain")) 
+
+#display map and overlay point representing bike and display animation by minute to track bike's movement and get a sense for the speed it traveled
+#ggmap(citymap1) + geom_point(data=pathbikeunique, aes(x= Lon...1., y= Lat...1.), colour = "blue", alpha = 0.5, size = 2)+ transition_reveal(along = pathbikeunique$timing...1.)+labs(title = "Date: {frame_along}")-> a
+
+#animate(a, duration = 91, fps = 20) ->smoothanimation
+
+
+gif_file("biketravels.gif")
+#anim_save("biketravels.gif", animation = last_animation())
+
 
 ```
 
