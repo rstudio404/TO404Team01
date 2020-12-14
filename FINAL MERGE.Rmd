@@ -1709,7 +1709,7 @@ combined_userT <- merge(avgdata3, weather, by.x = "mergedate", by.y = "DATE")
 
 # Make a set of plots
 baseplot_userT <- ggplot(data = combined_userT, aes(x = TAVG, y = count, colour = dayid))
-baseplot_userT + geom_point(size = 2, alpha = 0.5, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~usertype)
+baseplot_userT + geom_point(size = 2, alpha = 0.5)+ scale_color_manual(values=c("yellowgreen", "darkgreen")) + geom_smooth() + facet_wrap(~usertype)
 ```
 
 The same pattern as before is here, where the number of total bikes is very different between customers and subscribers. It is obvious that subscribers contribute more to the number of ridership, and we can again see that the general curve is the same. Interestingly, customers ride more at weekends than weekdays while subscribers shows the opposite. This indicates that most subscribers use citibikes as commuting vehicles, and most customers use them for leisure.
@@ -1726,7 +1726,7 @@ combined_age <- merge(avgdata, weather, by.x = "mergedate", by.y = "DATE")
 
 # Make a set of plots
 baseplot_age <- ggplot(data = combined_age, aes(x = TAVG, y = count, colour = dayid))
-baseplot_age + geom_point(size = 2, alpha = .2, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~ agegroup)
+baseplot_age + geom_point(size = 2, alpha = .2)+ scale_color_manual(values=c("yellowgreen", "darkgreen")) + geom_smooth() + facet_wrap(~ agegroup)
 ```
 
 From the perspective of weekday and weekend, it shows similar patterns to the overall influence by temp above between different age group. Moving to the difference of ridership between age groups, it is manifested that people within 20-40 ride most, and people over 40 years old follow, leaving young people under 20 with nearly no ridership. Lower ridership for people over 40 might be because they have enough financial support to own cars or other more comfortable ways than riding.
@@ -1764,7 +1764,7 @@ During the weekdays, average speed declines slightly with temperature. During th
 ```{r}
 # Make a set of plots
 baseplot_age <- ggplot(data = combined_age, aes(x = TAVG, y = speed, colour = dayid))
-baseplot_age + geom_point(size = 2, alpha = .2, color = "yellowgreen") + geom_smooth(color = "darkgreen") + facet_wrap(~ agegroup)
+baseplot_age + geom_point(size = 2, alpha = .2)+ scale_color_manual(values=c("yellowgreen", "darkgreen")) + geom_smooth() + facet_wrap(~ agegroup)
 ```
 
 The overall patterns of weeday and weekend are similar to the graphs above, but slight discrepancies exsit between age groups. For young people (under 20), the slopes are steeper all the time, significantly smaller ridership when average temp increases. For people between 20 to 40, there's no huge change of speed on weekdays. This makes sense because when they are riding to work, time is limited. 
